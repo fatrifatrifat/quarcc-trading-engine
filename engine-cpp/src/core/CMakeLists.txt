@@ -13,7 +13,6 @@ target_link_libraries(trading_core
     PUBLIC
         trading_interfaces
     PRIVATE
-        trading_utils
         Threads::Threads
 )
 
@@ -34,7 +33,6 @@ target_link_libraries(trading_engine
         trading_grpc
         trading_persistence
         trading_observability
-        trading_utils
         Threads::Threads
 )
 

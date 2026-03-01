@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
 # Build modules in dependency-friendly order
-add_subdirectory(utils)
 add_subdirectory(persistence)
 add_subdirectory(grpc)
 add_subdirectory(observability)

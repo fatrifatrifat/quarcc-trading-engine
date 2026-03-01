@@ -10,7 +10,6 @@ add_library(trading::persistence ALIAS trading_persistence)
 target_link_libraries(trading_persistence
     PUBLIC
         trading_interfaces
-        trading_utils
         SQLite::SQLite3
         Threads::Threads
 )

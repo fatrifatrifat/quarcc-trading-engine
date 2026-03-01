@@ -37,7 +37,6 @@ add_library(trading::gateways ALIAS trading_gateways)
 target_link_libraries(trading_gateways
     PUBLIC
         trading_interfaces
-        trading_utils
         Threads::Threads
 )
 

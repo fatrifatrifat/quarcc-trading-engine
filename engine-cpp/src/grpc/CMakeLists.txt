@@ -9,7 +9,6 @@ add_library(trading::grpc ALIAS trading_grpc)
 target_link_libraries(trading_grpc
     PUBLIC
         trading_interfaces
-        trading_utils
         SQLite::SQLite3
         Threads::Threads
 )
