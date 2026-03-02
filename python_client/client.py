@@ -218,7 +218,7 @@ if __name__ == "__main__":
     for i in range(5):
         print("\n--- Submitting BUY signal ---")
         order_id = client.submit_signal(
-            strategy_id="SMA_CROSS_v1.0",
+            strategy_id="mean_reversion_1",
             symbol="ACDC",
             side="BUY",
             quantity=1.5,
@@ -242,7 +242,6 @@ if __name__ == "__main__":
         #         confidence=0.85,
         #     )
 
-
         #     if order_id:
         #         print(f"Order replaced: {order_id}")
 
@@ -254,7 +253,7 @@ if __name__ == "__main__":
 
     import time
 
-    time.sleep(2)
+    time.sleep(0.5)
 
     # Get all positions
     print("\n--- All positions ---")

@@ -1,35 +1,29 @@
 #include <trading/core/trading_engine.h>
+#include <trading/gateways/paper_trading_gateway.h>
 #include <trading/persistence/sqlite_journal.h>
 #include <trading/persistence/sqlite_order_store.h>
-#include <trading/gateways/paper_trading_gateway.h>
 
 #include <chrono>
 #include <thread>
 
 namespace quarcc {
 
-static constexpr std::chrono::milliseconds kFillPollInterval{500};
-
-void TradingEngine::Run() {
+void TradingEngine::Run(const char *config_path) {
   GOOGLE_PROTOBUF_VERIFY_VERSION;
 
-  // TODO: config.h, reading configs from user to create strategies
-  managers_.emplace(
-      StrategyId{"SMA_CROSS_v1.0"},
-      OrderManager::CreateOrderManager(
-          std::make_unique<PositionKeeper>(), std::make_unique<PaperGateway>(),
-          std::make_unique<SQLiteJournal>("SMA_CROSS_v1_trading_journal.db"),
-          std::make_unique<SQLiteOrderStore>("SMA_CROSS_v1_trading_orders.db"),
-          std::make_unique<RiskManager>()));
+  try {
+    process_config(config_path);
+  } catch (const std::exception &e) {
+    std::cerr << "Config error: " << e.what() << std::endl;
+  }
 
-  server_ = std::make_unique<gRPCServer>("0.0.0.0:50051", *this);
   server_->start();
 
   while (running_) {
     for (auto &[strategy_id, manager] : managers_)
       manager->process_fills();
 
-    std::this_thread::sleep_for(kFillPollInterval);
+    std::this_thread::sleep_for(fill_poll_interval_);
   }
 
   server_->shutdown();
@@ -135,6 +129,34 @@ TradingEngine::ActivateKillSwitch(const v1::KillSwitchRequest &req) {
     manager->cancel_all(req.reason(), req.initiated_by());
 
   return std::monostate{};
+}
+
+void TradingEngine::process_config(const std::string &path) {
+  const Config config = parse_config(path);
+
+  for (const auto &strat : config.strategies) {
+    std::unique_ptr<IExecutionGateway> gateway;
+
+    if (strat.gateway == "alpaca") {
+      gateway = std::make_unique<AlpacaGateway>();
+    } else if (strat.gateway == "paper trading") {
+      gateway = std::make_unique<PaperGateway>();
+    } else {
+      throw std::runtime_error("Invalid gateway");
+    }
+
+    managers_.emplace(
+        StrategyId{strat.id},
+        OrderManager::CreateOrderManager(
+            std::make_unique<PositionKeeper>(), std::move(gateway),
+            std::make_unique<SQLiteJournal>(strat.database.journal),
+            std::make_unique<SQLiteOrderStore>(strat.database.orders),
+            std::make_unique<RiskManager>()));
+  }
+
+  server_ = std::make_unique<gRPCServer>(config.network.grpc.host_post, *this);
+  fill_poll_interval_ =
+      std::chrono::milliseconds{config.app.polling_interval_ms};
 }
 
 } // namespace quarcc

@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 find_package(Threads REQUIRED)
 find_package(SQLite3 REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
 # Shared interface target for include paths + common dependency propagation
 add_library(trading_interfaces INTERFACE)
@@ -57,6 +58,8 @@ set(TRADING_WITH_WEBSOCKET 0)
 set(TRADING_WITH_PROMETHEUS 0)
 
 add_subdirectory(src)
+
+target_link_libraries(trading_interfaces INTERFACE yaml-cpp)
 
 if(TRADING_BUILD_TESTS)
     add_subdirectory(tests)
