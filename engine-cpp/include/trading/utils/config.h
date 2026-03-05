@@ -28,11 +28,13 @@ struct DatabaseConfig {
 
 struct StrategyConfig {
   std::string id;
+  std::string account_id;
   std::string gateway;
   DatabaseConfig database;
 };
 
 struct Config {
+  std::string account_id;
   AppConfig app;
   NetworkConfig network;
   std::vector<StrategyConfig> strategies;
@@ -70,6 +72,7 @@ inline Config parse_config(const std::string &path) {
   for (const auto &node : root["strategies"]) {
     StrategyConfig s;
     s.id = node["id"].as<std::string>();
+    s.account_id = node["account_id"].as<std::string>();
     s.gateway = node["gateway"].as<std::string>();
 
     s.database = parse_database(s.id, node["database"]);

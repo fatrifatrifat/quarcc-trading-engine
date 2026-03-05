@@ -16,7 +16,12 @@ namespace quarcc {
 
 class OrderManager {
 public:
-  static std::unique_ptr<OrderManager> CreateOrderManager(
+  OrderManager(const OrderManager&) = delete;
+  OrderManager& operator=(const OrderManager&) = delete;
+  OrderManager(OrderManager&&) = delete;
+  OrderManager& operator=(OrderManager&&) = delete;
+
+  static std::unique_ptr<OrderManager> CreateOrderManager(std::string account_id,
       std::unique_ptr<PositionKeeper> pk, std::unique_ptr<IExecutionGateway> gw,
       std::unique_ptr<IJournal> lj, std::unique_ptr<IOrderStore> os,
       std::unique_ptr<RiskManager> rm);
@@ -38,7 +43,7 @@ public:
   v1::PositionList get_all_positions() const;
 
 private:
-  OrderManager(std::unique_ptr<PositionKeeper> pk,
+  OrderManager(std::string account_id, std::unique_ptr<PositionKeeper> pk,
                std::unique_ptr<IExecutionGateway> gw,
                std::unique_ptr<IJournal> lj, std::unique_ptr<IOrderStore> os,
                std::unique_ptr<RiskManager> rm);
@@ -47,6 +52,8 @@ private:
   v1::Order createOrderFromSignal(const v1::ReplaceSignal &signal);
 
 private:
+  std::string account_id_;
+
   std::unique_ptr<PositionKeeper> position_keeper_;
   std::unique_ptr<IExecutionGateway> gateway_;
   std::unique_ptr<IJournal> journal_;

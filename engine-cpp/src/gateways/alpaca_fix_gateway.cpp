@@ -23,7 +23,7 @@ Result<BrokerOrderId> AlpacaGateway::submit_order(const v1::Order &order) {
 
 Result<std::monostate>
 AlpacaGateway::cancel_order(const BrokerOrderId &orderId) {
-  auto resp = trade_.GetOrderByID(orderId);
+  auto resp = trade_.DeleteOrderByID(orderId);
   if (!resp) {
     return std::unexpected(Error{resp.error().message, ErrorType::Error});
   }
@@ -72,6 +72,7 @@ std::vector<v1::ExecutionReport> AlpacaGateway::get_fills() {
 
     const auto &order = resp.value();
     const double filled_qty = stod(order.filledQty);
+    const double avg_fill_price = stod(*order.filledAvgPrice);
 
     // Skip orders that haven't been filled at all yet.
     if (filled_qty <= 0.0)
@@ -84,6 +85,7 @@ std::vector<v1::ExecutionReport> AlpacaGateway::get_fills() {
                                                          : v1::Side::SELL);
     fill.set_filled_quantity(filled_qty);
     fill.set_fill_time(get_current_time());
+    fill.set_avg_fill_price(avg_fill_price);
     fills.push_back(std::move(fill));
 
     to_erase.push_back(broker_id);

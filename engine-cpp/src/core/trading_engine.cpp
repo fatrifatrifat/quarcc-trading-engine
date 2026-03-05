@@ -148,7 +148,8 @@ void TradingEngine::process_config(const std::string &path) {
     managers_.emplace(
         StrategyId{strat.id},
         OrderManager::CreateOrderManager(
-            std::make_unique<PositionKeeper>(), std::move(gateway),
+            std::move(config.account_id), std::make_unique<PositionKeeper>(),
+            std::move(gateway),
             std::make_unique<SQLiteJournal>(strat.database.journal),
             std::make_unique<SQLiteOrderStore>(strat.database.orders),
             std::make_unique<RiskManager>()));

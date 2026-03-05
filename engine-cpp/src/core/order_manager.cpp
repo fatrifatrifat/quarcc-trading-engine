@@ -3,12 +3,12 @@
 namespace quarcc {
 
 std::unique_ptr<OrderManager> OrderManager::CreateOrderManager(
-    std::unique_ptr<PositionKeeper> pk, std::unique_ptr<IExecutionGateway> gw,
-    std::unique_ptr<IJournal> lj, std::unique_ptr<IOrderStore> os,
-    std::unique_ptr<RiskManager> rm) {
+    std::string account_id, std::unique_ptr<PositionKeeper> pk,
+    std::unique_ptr<IExecutionGateway> gw, std::unique_ptr<IJournal> lj,
+    std::unique_ptr<IOrderStore> os, std::unique_ptr<RiskManager> rm) {
   return std::unique_ptr<OrderManager>(
-      new OrderManager(std::move(pk), std::move(gw), std::move(lj),
-                       std::move(os), std::move(rm)));
+      new OrderManager(std::move(account_id), std::move(pk), std::move(gw),
+                       std::move(lj), std::move(os), std::move(rm)));
 }
 
 Result<LocalOrderId>
@@ -146,7 +146,8 @@ OrderManager::processSignal(const v1::ReplaceSignal &signal) {
   id_mapper_->remove_mapping(old_local_id);
   id_mapper_->add_mapping(new_local_id, new_broker_id);
 
-  std::string log_data = std::format("Old: {} -> New: {} (Broker: {})", old_local_id, new_local_id, new_broker_id);
+  std::string log_data = std::format("Old: {} -> New: {} (Broker: {})",
+                                     old_local_id, new_local_id, new_broker_id);
 
   journal_->log(Event::ORDER_SUBMITTED, log_data, new_local_id);
 
@@ -210,7 +211,9 @@ void OrderManager::process_fills() {
                               fill.side());
 
     // 6. Journal the event
-    const std::string log_data = std::format("Filled: {} / {} @ avg=", filled_qty, original_qty, fill.avg_fill_price());
+    const std::string log_data =
+        std::format("Filled: {} / {} @ avg=", filled_qty, original_qty,
+                    fill.avg_fill_price());
 
     journal_->log(fully_filled ? Event::ORDER_FILLED
                                : Event::ORDER_PARTIALLY_FILLED,
@@ -267,14 +270,15 @@ v1::PositionList OrderManager::get_all_positions() const {
   return position_keeper_->getAllPositions();
 }
 
-OrderManager::OrderManager(std::unique_ptr<PositionKeeper> pk,
+OrderManager::OrderManager(std::string account_id,
+                           std::unique_ptr<PositionKeeper> pk,
                            std::unique_ptr<IExecutionGateway> gw,
                            std::unique_ptr<IJournal> lj,
                            std::unique_ptr<IOrderStore> os,
                            std::unique_ptr<RiskManager> rm)
-    : position_keeper_(std::move(pk)), gateway_(std::move(gw)),
-      journal_(std::move(lj)), order_store_(std::move(os)),
-      risk_manager_(std::move(rm)),
+    : account_id_(std::move(account_id)), position_keeper_(std::move(pk)),
+      gateway_(std::move(gw)), journal_(std::move(lj)),
+      order_store_(std::move(os)), risk_manager_(std::move(rm)),
       id_generator_(std::make_unique<OrderIdGenerator>()),
       id_mapper_(std::make_unique<OrderIdMapper>()) {}
 
