@@ -18,13 +18,10 @@ void TradingEngine::Run(const char *config_path) {
   }
 
   server_->start();
+  scheduler_.start();
 
-  while (running_) {
-    for (auto &[strategy_id, manager] : managers_)
-      manager->process_fills();
-
-    std::this_thread::sleep_for(fill_poll_interval_);
-  }
+  while (running_)
+    ;
 
   server_->shutdown();
   google::protobuf::ShutdownProtobufLibrary();
@@ -153,11 +150,14 @@ void TradingEngine::process_config(const std::string &path) {
             std::make_unique<SQLiteJournal>(strat.database.journal),
             std::make_unique<SQLiteOrderStore>(strat.database.orders),
             std::make_unique<RiskManager>()));
+
+    auto interval = strat.polling_interval_ms;
+    auto &manager = managers_[strat.id];
+    scheduler_.add_strategy(strat.id, std::chrono::milliseconds{interval},
+                            [&manager] { manager->process_fills(); });
   }
 
   server_ = std::make_unique<gRPCServer>(config.network.grpc.host_post, *this);
-  fill_poll_interval_ =
-      std::chrono::milliseconds{config.app.polling_interval_ms};
 }
 
 } // namespace quarcc

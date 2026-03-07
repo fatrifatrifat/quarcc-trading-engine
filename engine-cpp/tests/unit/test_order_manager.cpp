@@ -22,6 +22,7 @@ struct OrderManagerFixture : public Test {
   std::unique_ptr<OrderManager> manager;
 
   void SetUp() override {
+    static int id{};
     auto gw_owned = std::make_unique<NiceMock<MockExecutionGateway>>();
     auto jn_owned = std::make_unique<NiceMock<MockJournal>>();
     auto os_owned = std::make_unique<NiceMock<MockOrderStore>>();
@@ -31,8 +32,8 @@ struct OrderManagerFixture : public Test {
     store = os_owned.get();
 
     manager = OrderManager::CreateOrderManager(
-        std::make_unique<PositionKeeper>(), std::move(gw_owned),
-        std::move(jn_owned), std::move(os_owned),
+        std::format("strategy_#{}", id), std::make_unique<PositionKeeper>(),
+        std::move(gw_owned), std::move(jn_owned), std::move(os_owned),
         std::make_unique<RiskManager>());
   }
 };
@@ -57,12 +58,11 @@ TEST_F(OrderManagerFixture, SubmitSignalGatewayReject) {
   ON_CALL(*store, update_order_status(_, _))
       .WillByDefault(Return(std::monostate{}));
   ON_CALL(*gw, submit_order(_))
-      .WillByDefault(
-          Return(std::unexpected(Error{"Rejected by broker", ErrorType::Error})));
+      .WillByDefault(Return(
+          std::unexpected(Error{"Rejected by broker", ErrorType::Error})));
 
   // Status must be set to REJECTED on gateway failure.
-  EXPECT_CALL(*store,
-              update_order_status(_, OrderStatus::REJECTED));
+  EXPECT_CALL(*store, update_order_status(_, OrderStatus::REJECTED));
 
   auto result = manager->processSignal(test::make_signal());
   EXPECT_FALSE(result.has_value());
@@ -156,8 +156,8 @@ TEST_F(OrderManagerFixture, ProcessFillsFullyFilledOrder) {
       .WillByDefault(Return(std::monostate{}));
   ON_CALL(*gw, submit_order(_)).WillByDefault(Return(std::string{"BROKER_F1"}));
 
-  auto submit = manager->processSignal(test::make_signal("TEST", "AAPL",
-                                                         v1::Side::BUY, 10.0));
+  auto submit = manager->processSignal(
+      test::make_signal("TEST", "AAPL", v1::Side::BUY, 10.0));
   ASSERT_TRUE(submit.has_value());
   const std::string local_id = *submit;
 
@@ -166,9 +166,8 @@ TEST_F(OrderManagerFixture, ProcessFillsFullyFilledOrder) {
   ON_CALL(*gw, get_fills()).WillByDefault(Return(std::vector{fill}));
 
   // Stored order to compare original qty.
-  auto stored =
-      test::make_stored_order(local_id, "AAPL", v1::Side::BUY, 10.0,
-                              OrderStatus::SUBMITTED, "BROKER_F1");
+  auto stored = test::make_stored_order(local_id, "AAPL", v1::Side::BUY, 10.0,
+                                        OrderStatus::SUBMITTED, "BROKER_F1");
   ON_CALL(*store, get_order(local_id)).WillByDefault(Return(stored));
   ON_CALL(*store, update_fill_info(_, _, _))
       .WillByDefault(Return(std::monostate{}));
@@ -192,17 +191,16 @@ TEST_F(OrderManagerFixture, ProcessFillsPartialFill) {
       .WillByDefault(Return(std::monostate{}));
   ON_CALL(*gw, submit_order(_)).WillByDefault(Return(std::string{"BROKER_P1"}));
 
-  auto submit = manager->processSignal(test::make_signal("TEST", "AAPL",
-                                                         v1::Side::BUY, 10.0));
+  auto submit = manager->processSignal(
+      test::make_signal("TEST", "AAPL", v1::Side::BUY, 10.0));
   ASSERT_TRUE(submit.has_value());
   const std::string local_id = *submit;
 
   auto fill = test::make_fill("BROKER_P1", "AAPL", v1::Side::BUY, 5.0, 150.0);
   ON_CALL(*gw, get_fills()).WillByDefault(Return(std::vector{fill}));
 
-  auto stored =
-      test::make_stored_order(local_id, "AAPL", v1::Side::BUY, 10.0,
-                              OrderStatus::SUBMITTED, "BROKER_P1");
+  auto stored = test::make_stored_order(local_id, "AAPL", v1::Side::BUY, 10.0,
+                                        OrderStatus::SUBMITTED, "BROKER_P1");
   ON_CALL(*store, get_order(local_id)).WillByDefault(Return(stored));
   ON_CALL(*store, update_fill_info(_, _, _))
       .WillByDefault(Return(std::monostate{}));

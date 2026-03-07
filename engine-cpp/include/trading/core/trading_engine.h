@@ -1,6 +1,7 @@
 #pragma once
 
 #include <trading/core/order_manager.h>
+#include <trading/core/poll_scheduler.h>
 #include <trading/gateways/alpaca_fix_gateway.h>
 #include <trading/grpc/grpc_server.h>
 #include <trading/interfaces/i_execution_service_handler.h>
@@ -34,8 +35,7 @@ private:
   std::atomic<bool> running_{true};
   std::unique_ptr<gRPCServer> server_;
   std::unordered_map<StrategyId, std::unique_ptr<OrderManager>> managers_;
-
-  std::chrono::milliseconds fill_poll_interval_{500};
+  PollScheduler scheduler_;
 };
 
 } // namespace quarcc

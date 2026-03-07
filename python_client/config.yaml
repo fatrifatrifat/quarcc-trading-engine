@@ -1,6 +1,3 @@
-app:
-  polling_interval_ms: 500
-
 network:
   grpc:
     host: "0.0.0.0"
@@ -9,12 +6,14 @@ network:
 
 strategies:
   - id: "mean_reversion_1"
+    polling_interval_ms: 500
     account_id: "name_id0"
     gateway: "paper trading" # Or alpaca
     database:
       journal: "trading_journal" # These values by default in the code, but user can specify a new name
       orders: "trading_orders" # Same thing here
   - id: "momentum_1"
+    polling_interval_ms: 200
     account_id: "name_id1"
     gateway: "paper trading"
     database:

@@ -7,9 +7,6 @@
 #include <vector>
 
 namespace quarcc {
-struct AppConfig {
-  int polling_interval_ms{};
-};
 
 struct GrpcConfig {
   std::string host_post;
@@ -28,6 +25,7 @@ struct DatabaseConfig {
 
 struct StrategyConfig {
   std::string id;
+  int polling_interval_ms{};
   std::string account_id;
   std::string gateway;
   DatabaseConfig database;
@@ -35,7 +33,6 @@ struct StrategyConfig {
 
 struct Config {
   std::string account_id;
-  AppConfig app;
   NetworkConfig network;
   std::vector<StrategyConfig> strategies;
 };
@@ -62,8 +59,6 @@ inline Config parse_config(const std::string &path) {
 
   Config cfg;
 
-  cfg.app.polling_interval_ms = root["app"]["polling_interval_ms"].as<int>();
-
   cfg.network.grpc.host = root["network"]["grpc"]["host"].as<std::string>();
   cfg.network.grpc.port = root["network"]["grpc"]["port"].as<int>();
   cfg.network.grpc.host_post =
@@ -72,6 +67,7 @@ inline Config parse_config(const std::string &path) {
   for (const auto &node : root["strategies"]) {
     StrategyConfig s;
     s.id = node["id"].as<std::string>();
+    s.polling_interval_ms = node["polling_interval_ms"].as<int>();
     s.account_id = node["account_id"].as<std::string>();
     s.gateway = node["gateway"].as<std::string>();
 
