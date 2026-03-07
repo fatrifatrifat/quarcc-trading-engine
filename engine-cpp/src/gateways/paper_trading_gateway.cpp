@@ -62,4 +62,33 @@ std::vector<v1::ExecutionReport> PaperGateway::get_fills() {
   return fills;
 }
 
+void PaperGateway::advance_prices() noexcept {
+  constexpr double spread_bps = 5.0;
+  for (auto &[symbol, ps] : prices_) {
+    double mid = (ps.bid + ps.ask) / 2.0;
+    double move = mid * config_.price_volatility * price_dist_(rng_);
+    mid = std::max(mid + move, 0.01);
+    double half_spread = mid * (spread_bps / 20000.0);
+    ps.bid = mid - half_spread;
+    ps.ask = mid + half_spread;
+  }
+}
+
+double PaperGateway::get_or_init_price(const std::string &symbol) noexcept {
+  if (!prices_.contains(symbol)) {
+    double mid = config_.initial_price;
+    double half_spread = mid * 0.00025;
+    prices_[symbol] = {mid - half_spread, mid + half_spread};
+  }
+
+  return (prices_[symbol].bid + prices_[symbol].ask) / 2.0;
+}
+
+// TODO: MarketDataService that would call this
+void PaperGateway::update_price(const std::string &symbol, double bid,
+                                double ask) noexcept {
+  std::lock_guard lk{orders_mutex_};
+  prices_[symbol] = {bid, ask};
+}
+
 } // namespace quarcc
