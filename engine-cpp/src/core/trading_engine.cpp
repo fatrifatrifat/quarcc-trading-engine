@@ -4,10 +4,11 @@
 #include <trading/persistence/sqlite_order_store.h>
 
 #include <chrono>
-#include <thread>
 
 namespace quarcc {
 
+// BUG TODO: qty/pnl rises to the roof (8 digits+) after ~1000-1500 signals,
+// investigate why/when/how, maybe caused by client.py
 void TradingEngine::Run(const char *config_path) {
   GOOGLE_PROTOBUF_VERIFY_VERSION;
 
@@ -20,6 +21,7 @@ void TradingEngine::Run(const char *config_path) {
   server_->start();
   scheduler_.start();
 
+  // BUG TODO: cv instead of spinning
   while (running_)
     ;
 
@@ -120,11 +122,10 @@ Result<v1::PositionList> TradingEngine::GetAllPositions(const v1::Empty &) {
 // Stops running, cancels all cancellable orders
 Result<std::monostate>
 TradingEngine::ActivateKillSwitch(const v1::KillSwitchRequest &req) {
-  running_ = false;
-
   for (auto &[strategy_id, manager] : managers_)
     manager->cancel_all(req.reason(), req.initiated_by());
 
+  running_ = false;
   return std::monostate{};
 }
 
@@ -145,7 +146,7 @@ void TradingEngine::process_config(const std::string &path) {
     managers_.emplace(
         StrategyId{strat.id},
         OrderManager::CreateOrderManager(
-            std::move(config.account_id), std::make_unique<PositionKeeper>(),
+            config.account_id, std::make_unique<PositionKeeper>(),
             std::move(gateway),
             std::make_unique<SQLiteJournal>(strat.database.journal),
             std::make_unique<SQLiteOrderStore>(strat.database.orders),

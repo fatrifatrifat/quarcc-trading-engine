@@ -91,14 +91,18 @@ struct LogEntry {
 
   static std::string timestamp_to_string(Timestamp ts) {
     auto time_t = std::chrono::system_clock::to_time_t(ts);
-    std::tm tm = *std::gmtime(&time_t);
+    std::tm tm;
+    if (auto r = gmtime_r(&time_t, &tm); r == NULL) {
+      throw std::runtime_error("gmtime_r error");
+    }
+
     char buffer[32];
     std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &tm);
 
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                   ts.time_since_epoch()) %
               1000;
-    return std::string(buffer) + "." + std::to_string(ms.count());
+    return std::format("{}.{:03d}", buffer, ms.count());
   }
 
   // TODO: More robust parser

@@ -209,58 +209,40 @@ class ExecutionClient:
         self.channel.close()
 
 
-# Example usage
 if __name__ == "__main__":
-    # Create client
-    client = ExecutionClient("localhost:50051")
-
-    # Submit a buy signal
-    for i in range(5):
-        print("\n--- Submitting BUY signal ---")
-        order_id = client.submit_signal(
-            strategy_id="mean_reversion_1",
-            symbol="ACDC",
-            side="BUY",
-            quantity=1.5,
-            confidence=0.85,
-        )
-
-        # if order_id:
-        #     print(f"Order submitted: {order_id}")
-
-        #     import time
-
-        #     time.sleep(2)
-
-        #     print("\n--- Submitting REPLACE signal ---")
-        #     order_id = client.replace_order(
-        #         strategy_id="SMA_CROSS_v1.0",
-        #         order_id=order_id,
-        #         symbol="ACDC",
-        #         side="BUY",
-        #         quantity=1,
-        #         confidence=0.85,
-        #     )
-
-        #     if order_id:
-        #         print(f"Order replaced: {order_id}")
-
-        #         print("\n--- Submitting CANCEL signal ---")
-        #         client.cancel_signal(
-        #             strategy_id="SMA_CROSS_v1.0",
-        #             order_id=order_id,
-        #         )
-
     import time
 
-    time.sleep(0.5)
+    client = ExecutionClient("localhost:50051")
 
-    # Get all positions
-    print("\n--- All positions ---")
-    positions = client.get_all_positions()
-    print(positions)
-    for pos in positions:
-        print(f"{pos['symbol']}: {pos['quantity']} shares @ ${pos['avg_price']:.2f}")
+    strategy_id = "simple_test_strategy"
+    symbol = "ACDC"
 
-    # Close
-    client.close()
+    try:
+        for i in range(300):   # also reduce iterations while testing
+            client.submit_signal(strategy_id, symbol, "BUY", 2.0)
+            client.submit_signal(strategy_id, symbol, "BUY", 1.0)
+            client.submit_signal(strategy_id, symbol, "SELL", 1.5)
+
+            time.sleep(1.5)   # wait for fills to arrive (polling interval is 500ms, so 1.5s is safe)
+
+            pos = client.get_position(symbol)
+            if pos is not None:
+                remaining_qty = pos["quantity"]
+                if remaining_qty > 0:
+                    client.submit_signal(strategy_id, symbol, "SELL", remaining_qty, 1.0)
+                elif remaining_qty < 0:
+                    client.submit_signal(strategy_id, symbol, "BUY", abs(remaining_qty), 1.0)
+
+            time.sleep(1.5)   # wait for the flatten order to fill too
+
+        print("\n--- All positions ---")
+        positions = client.get_all_positions()
+        for p in positions:
+            print(
+                f"{p['symbol']}: qty={p['quantity']:.2f}, "
+                f"avg={p['avg_price']:.2f}, "
+                f"rPnL={p['realized_pnl']:.2f}"
+            )
+
+    finally:
+        client.close()

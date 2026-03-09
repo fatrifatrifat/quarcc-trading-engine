@@ -143,6 +143,7 @@ grpc::Status gRPCServer::ExecutionServiceImpl::StreamSignals(
       response.set_rejection_reason(r.error().message_);
     } else {
       response.set_accepted(true);
+      response.set_order_id(r.value());
     }
 
     stream->Write(response);

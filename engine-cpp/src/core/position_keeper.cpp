@@ -27,20 +27,34 @@ void PositionKeeper::on_fill(const std::string &symbol, double fill_qty,
   const double old_qty = pos.quantity;
   const double new_qty = old_qty + signed_fill;
 
+  // realized PnL: only when the fill reduces/closes an existing position
+  if (fill_price > 0.0 && old_qty != 0.0 && (old_qty * signed_fill < 0.0)) {
+    const double closed_qty =
+        std::min(std::abs(old_qty), std::abs(signed_fill));
+
+    if (old_qty > 0.0) {
+      // reducing a long with a sell
+      pos.rPnL += (fill_price - pos.avgPrice) * closed_qty;
+    } else {
+      // reducing a short with a buy
+      pos.rPnL += (pos.avgPrice - fill_price) * closed_qty;
+    }
+  }
+
   if (fill_price > 0.0) {
     if (new_qty == 0.0) {
-      // Position went flat
+      // position went flat
       pos.avgPrice = 0.0;
     } else if (old_qty == 0.0) {
-      // Opening a brand-new position
+      // opening a brand-new position
       pos.avgPrice = fill_price;
     } else if ((old_qty > 0.0 && new_qty < 0.0) ||
                (old_qty < 0.0 && new_qty > 0.0)) {
-      // Position flipped sides; the new position's cost basis is the fill
+      // position flipped sides; the new position's cost basis is the fill
       pos.avgPrice = fill_price;
     } else if ((old_qty > 0.0 && signed_fill > 0.0) ||
                (old_qty < 0.0 && signed_fill < 0.0)) {
-      // Adding to the existing side: weighted average
+      // adding to the existing side: weighted average
       pos.avgPrice =
           (old_qty * pos.avgPrice + signed_fill * fill_price) / new_qty;
     }
@@ -51,7 +65,7 @@ void PositionKeeper::on_fill(const std::string &symbol, double fill_qty,
 }
 
 Result<v1::Position>
-PositionKeeper::getPosition(const std::string &symbol) const {
+PositionKeeper::get_position(const std::string &symbol) const {
   std::shared_lock lock(mutex_);
 
   auto it = positions_.find(symbol);
@@ -63,11 +77,12 @@ PositionKeeper::getPosition(const std::string &symbol) const {
   pos.set_symbol(it->second.symbol);
   pos.set_quantity(it->second.quantity);
   pos.set_avg_price(it->second.avgPrice);
+  pos.set_realized_pnl(it->second.rPnL);
 
   return pos;
 }
 
-v1::PositionList PositionKeeper::getAllPositions() const {
+v1::PositionList PositionKeeper::get_all_positions() const {
   std::shared_lock lock(mutex_);
 
   v1::PositionList all_pos;
@@ -76,6 +91,7 @@ v1::PositionList PositionKeeper::getAllPositions() const {
     pos.set_symbol(curr_pos.symbol);
     pos.set_quantity(curr_pos.quantity);
     pos.set_avg_price(curr_pos.avgPrice);
+    pos.set_realized_pnl(curr_pos.rPnL);
     all_pos.add_positions()->CopyFrom(pos);
   }
 

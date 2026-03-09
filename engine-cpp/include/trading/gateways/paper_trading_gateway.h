@@ -37,8 +37,14 @@ private:
     double ask;
   };
 
+  struct SimulatedOrder {
+    v1::Order order;
+    double submitted_at_price; // mid at submission time
+    double cumulative_filled;  // across poll cycles
+  };
+
 private:
-  std::unordered_map<BrokerOrderId, v1::Order> pending_orders_;
+  std::unordered_map<BrokerOrderId, SimulatedOrder> pending_orders_;
   std::mutex orders_mutex_;
   OrderIdGenerator id_gen_;
   std::unordered_map<std::string, PriceState> prices_;

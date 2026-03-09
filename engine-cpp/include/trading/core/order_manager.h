@@ -16,16 +16,18 @@ namespace quarcc {
 
 class OrderManager {
 public:
-  OrderManager(const OrderManager&) = delete;
-  OrderManager& operator=(const OrderManager&) = delete;
-  OrderManager(OrderManager&&) = delete;
-  OrderManager& operator=(OrderManager&&) = delete;
+  OrderManager(const OrderManager &) = delete;
+  OrderManager &operator=(const OrderManager &) = delete;
+  OrderManager(OrderManager &&) = delete;
+  OrderManager &operator=(OrderManager &&) = delete;
 
-  static std::unique_ptr<OrderManager> CreateOrderManager(std::string account_id,
-      std::unique_ptr<PositionKeeper> pk, std::unique_ptr<IExecutionGateway> gw,
-      std::unique_ptr<IJournal> lj, std::unique_ptr<IOrderStore> os,
-      std::unique_ptr<RiskManager> rm);
+  static std::unique_ptr<OrderManager> CreateOrderManager(
+      std::string account_id, std::unique_ptr<PositionKeeper> pk,
+      std::unique_ptr<IExecutionGateway> gw, std::unique_ptr<IJournal> lj,
+      std::unique_ptr<IOrderStore> os, std::unique_ptr<RiskManager> rm);
 
+  // BUG TODO: Investigate fills and partial fills, weird behavior noticed
+  // through journal/order dbs
   Result<LocalOrderId> processSignal(const v1::StrategySignal &signal);
   Result<std::monostate> processSignal(const v1::CancelSignal &signal);
   Result<LocalOrderId> processSignal(const v1::ReplaceSignal &signal);
@@ -48,8 +50,8 @@ private:
                std::unique_ptr<IJournal> lj, std::unique_ptr<IOrderStore> os,
                std::unique_ptr<RiskManager> rm);
 
-  v1::Order createOrderFromSignal(const v1::StrategySignal &signal);
-  v1::Order createOrderFromSignal(const v1::ReplaceSignal &signal);
+  v1::Order create_order_from_signal(const v1::StrategySignal &signal);
+  v1::Order create_order_from_signal(const v1::ReplaceSignal &signal);
 
 private:
   std::string account_id_;
@@ -61,6 +63,10 @@ private:
   std::unique_ptr<RiskManager> risk_manager_;
   std::unique_ptr<OrderIdGenerator> id_generator_;
   std::unique_ptr<OrderIdMapper> id_mapper_;
+
+  // Fills whose broker_order_id wasn't in the mapper yet (submit/fill race).
+  // Re-processed at the start of the next process_fills() call.
+  std::vector<v1::ExecutionReport> deferred_fills_;
 };
 
 } // namespace quarcc

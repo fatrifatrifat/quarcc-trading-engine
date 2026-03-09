@@ -70,11 +70,6 @@ public:
     }
   }
 
-  const std::unordered_map<LocalOrderId, BrokerOrderId> &
-  get_local_to_broker() const {
-    return local_to_broker_;
-  }
-
 private:
   mutable std::shared_mutex mutex_;
   std::unordered_map<LocalOrderId, BrokerOrderId> local_to_broker_;

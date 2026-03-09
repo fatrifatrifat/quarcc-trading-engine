@@ -15,7 +15,7 @@ Result<LocalOrderId>
 OrderManager::processSignal(const v1::StrategySignal &signal) {
   // Create order
   std::string local_id = id_generator_->generate();
-  v1::Order order = createOrderFromSignal(signal);
+  v1::Order order = create_order_from_signal(signal);
   order.set_id(local_id);
   journal_->log(Event::ORDER_CREATED, order.DebugString(), order.id());
 
@@ -47,7 +47,14 @@ OrderManager::processSignal(const v1::StrategySignal &signal) {
   }
 
   std::string broker_id = result.value();
-  if (auto result = order_store_->update_broker_id(local_id, broker_id);
+
+  // Set SUBMITTED in the DB *before* add_mapping() makes this order visible to
+  // the fill-poll thread. Without this ordering, the poll thread can process
+  // the fill and set status=FILLED, and then this thread's update_order_status
+  // call below would overwrite it back to SUBMITTED, permanently sticking the
+  // order.
+  if (auto result =
+          order_store_->update_order_status(local_id, OrderStatus::SUBMITTED);
       !result) {
     journal_->log(Event::ERROR_OCCURRED, result.error().message_, local_id);
     return std::unexpected(result.error());
@@ -55,16 +62,14 @@ OrderManager::processSignal(const v1::StrategySignal &signal) {
 
   id_mapper_->add_mapping(local_id, broker_id);
 
-  std::string log_data = "Local: " + local_id + ", Broker: " + broker_id;
-  journal_->log(Event::ORDER_SUBMITTED, log_data, local_id);
-
-  if (auto result =
-          order_store_->update_order_status(local_id, OrderStatus::SUBMITTED);
+  if (auto result = order_store_->update_broker_id(local_id, broker_id);
       !result) {
     journal_->log(Event::ERROR_OCCURRED, result.error().message_, local_id);
-    id_mapper_->remove_mapping(local_id);
     return std::unexpected(result.error());
   }
+
+  std::string log_data = "Local: " + local_id + ", Broker: " + broker_id;
+  journal_->log(Event::ORDER_SUBMITTED, log_data, local_id);
 
   return local_id;
 }
@@ -85,6 +90,7 @@ OrderManager::processSignal(const v1::CancelSignal &signal) {
     journal_->log(Event::ORDER_CANCELLED, "Cancelled", local_id);
     // id_mapper_->remove_mapping(local_id); TODO: Removal after a grace period
     // (to wait for the execution to complete)
+    id_mapper_->remove_mapping(local_id);
     if (auto result =
             order_store_->update_order_status(local_id, OrderStatus::CANCELLED);
         !result) {
@@ -108,7 +114,7 @@ OrderManager::processSignal(const v1::ReplaceSignal &signal) {
 
   std::string new_local_id = id_generator_->generate();
 
-  v1::Order new_order = createOrderFromSignal(signal);
+  v1::Order new_order = create_order_from_signal(signal);
   new_order.set_id(new_local_id);
 
   journal_->log(Event::ORDER_REPLACED,
@@ -122,6 +128,8 @@ OrderManager::processSignal(const v1::ReplaceSignal &signal) {
   }
 
   std::string new_broker_id = result.value();
+  id_mapper_->remove_mapping(old_local_id);
+  id_mapper_->add_mapping(new_local_id, new_broker_id);
 
   if (auto result = order_store_->update_order_status(old_local_id,
                                                       OrderStatus::REPLACED);
@@ -143,9 +151,6 @@ OrderManager::processSignal(const v1::ReplaceSignal &signal) {
     return std::unexpected(store_result.error());
   }
 
-  id_mapper_->remove_mapping(old_local_id);
-  id_mapper_->add_mapping(new_local_id, new_broker_id);
-
   std::string log_data = std::format("Old: {} -> New: {} (Broker: {})",
                                      old_local_id, new_local_id, new_broker_id);
 
@@ -154,8 +159,8 @@ OrderManager::processSignal(const v1::ReplaceSignal &signal) {
   return new_local_id;
 }
 
-// Called periodically by TradingEngine::Run(). Asks the gateway for any fills
-// that arrived since the last poll, then for each ExecutionReport:
+// TradingEngine::Run(). Asks the gateway for any fills that arrived since the
+// last poll, then for each ExecutionReport:
 //   1. Resolves the local order ID via the bidirectional ID mapper.
 //   2. Fetches the stored order to compare filled vs original quantity.
 //   3. Updates fill info (quantity, avg price) in the order store.
@@ -166,14 +171,20 @@ OrderManager::processSignal(const v1::ReplaceSignal &signal) {
 void OrderManager::process_fills() {
   auto fills = gateway_->get_fills();
 
+  // Prepend any fills that were deferred last cycle due to the submit/fill
+  // race (mapping not yet established when the fill arrived).
+  fills.insert(fills.begin(), deferred_fills_.begin(), deferred_fills_.end());
+  deferred_fills_.clear();
+
   for (const auto &fill : fills) {
     const std::string &broker_id = fill.broker_order_id();
 
     // 1. Resolve broker → local ID
     auto local_id_opt = id_mapper_->get_local_id(broker_id);
     if (!local_id_opt) {
-      journal_->log(Event::ERROR_OCCURRED,
-                    "Received fill for unknown broker order: " + broker_id);
+      // The mapping may not be established yet (submit_order returned but
+      // add_mapping hasn't run). Retry next cycle instead of discarding.
+      deferred_fills_.push_back(fill);
       continue;
     }
     const std::string &local_id = *local_id_opt;
@@ -197,8 +208,10 @@ void OrderManager::process_fills() {
       journal_->log(Event::ERROR_OCCURRED, r.error().message_, local_id);
     }
 
+    // BUG TODO: filled_qty = already filled qty + new filled_qty
     // 4. Determine and persist the new order status
-    const bool fully_filled = (filled_qty >= original_qty);
+    const bool fully_filled =
+        (stored->filled_quantity + filled_qty >= original_qty);
     const OrderStatus new_status =
         fully_filled ? OrderStatus::FILLED : OrderStatus::PARTIALLY_FILLED;
 
@@ -212,7 +225,7 @@ void OrderManager::process_fills() {
 
     // 6. Journal the event
     const std::string log_data =
-        std::format("Filled: {} / {} @ avg=", filled_qty, original_qty,
+        std::format("Filled: {} / {} @ avg={}", filled_qty, original_qty,
                     fill.avg_fill_price());
 
     journal_->log(fully_filled ? Event::ORDER_FILLED
@@ -246,7 +259,7 @@ void OrderManager::cancel_all(const std::string &reason,
           !r) {
         journal_->log(Event::ERROR_OCCURRED, r.error().message_,
                       stored.local_id);
-        return;
+        continue;
       }
 
       id_mapper_->remove_mapping(stored.local_id);
@@ -263,11 +276,11 @@ void OrderManager::cancel_all(const std::string &reason,
 
 Result<v1::Position>
 OrderManager::get_position(const std::string &symbol) const {
-  return position_keeper_->getPosition(symbol);
+  return position_keeper_->get_position(symbol);
 }
 
 v1::PositionList OrderManager::get_all_positions() const {
-  return position_keeper_->getAllPositions();
+  return position_keeper_->get_all_positions();
 }
 
 OrderManager::OrderManager(std::string account_id,
@@ -283,28 +296,29 @@ OrderManager::OrderManager(std::string account_id,
       id_mapper_(std::make_unique<OrderIdMapper>()) {}
 
 v1::Order
-OrderManager::createOrderFromSignal(const v1::StrategySignal &signal) {
+OrderManager::create_order_from_signal(const v1::StrategySignal &signal) {
   v1::Order order;
   order.set_symbol(signal.symbol());
   order.set_side(signal.side());
   order.set_quantity(signal.target_quantity());
   order.set_type(v1::OrderType::MARKET);
   order.set_account_id("quarcc.Rifat");
-  // order.created_at(order.id());
+  order.set_created_at(get_current_time());
   order.set_time_in_force(v1::TimeInForce::DAY);
   order.set_strategy_id(signal.strategy_id());
   // order.metadata(). = signal.metadata(); // TODO: Copy metadata from signal
   return order;
 }
 
-v1::Order OrderManager::createOrderFromSignal(const v1::ReplaceSignal &signal) {
+v1::Order
+OrderManager::create_order_from_signal(const v1::ReplaceSignal &signal) {
   v1::Order order;
   order.set_symbol(signal.symbol());
   order.set_side(signal.side());
   order.set_quantity(signal.target_quantity());
   order.set_type(v1::OrderType::MARKET);
   order.set_account_id("quarcc.Rifat");
-  // order.created_at(order.id()); // TODO: Timestamp
+  order.set_created_at(get_current_time());
   order.set_time_in_force(v1::TimeInForce::DAY);
   order.set_strategy_id(signal.strategy_id());
   // order.metadata(). = signal.metadata(); // TODO: Copy metadata from signal

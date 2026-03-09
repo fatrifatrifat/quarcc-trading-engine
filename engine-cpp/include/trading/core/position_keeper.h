@@ -19,14 +19,15 @@ public:
   void on_fill(const std::string &symbol, double fill_qty, double fill_price,
                v1::Side side);
 
-  Result<v1::Position> getPosition(const std::string &symbol) const;
-  v1::PositionList getAllPositions() const;
+  Result<v1::Position> get_position(const std::string &symbol) const;
+  v1::PositionList get_all_positions() const;
 
 private:
   struct Position {
     std::string symbol;
     double quantity = 0.0;
     double avgPrice = 0.0;
+    double rPnL = 0.0;
   };
 
   mutable std::shared_mutex mutex_;

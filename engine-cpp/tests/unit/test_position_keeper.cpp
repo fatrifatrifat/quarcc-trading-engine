@@ -19,15 +19,15 @@ static void sell(PositionKeeper &pk, const std::string &sym, double qty,
 
 TEST(PositionKeeper, FreshKeeperHasNoPosition) {
   PositionKeeper pk;
-  EXPECT_FALSE(pk.getPosition("AAPL").has_value());
-  EXPECT_EQ(pk.getAllPositions().positions_size(), 0);
+  EXPECT_FALSE(pk.get_position("AAPL").has_value());
+  EXPECT_EQ(pk.get_all_positions().positions_size(), 0);
 }
 
 TEST(PositionKeeper, SingleBuyOpensPosition) {
   PositionKeeper pk;
   buy(pk, "AAPL", 10.0, 150.0);
 
-  auto pos = pk.getPosition("AAPL");
+  auto pos = pk.get_position("AAPL");
   ASSERT_TRUE(pos.has_value());
   EXPECT_DOUBLE_EQ(pos->quantity(), 10.0);
   EXPECT_DOUBLE_EQ(pos->avg_price(), 150.0);
@@ -38,7 +38,7 @@ TEST(PositionKeeper, SecondBuyAccumulatesWeightedAvg) {
   buy(pk, "AAPL", 10.0, 100.0); // avg = 100
   buy(pk, "AAPL", 10.0, 200.0); // avg = (10*100 + 10*200)/20 = 150
 
-  auto pos = pk.getPosition("AAPL");
+  auto pos = pk.get_position("AAPL");
   ASSERT_TRUE(pos.has_value());
   EXPECT_DOUBLE_EQ(pos->quantity(), 20.0);
   EXPECT_DOUBLE_EQ(pos->avg_price(), 150.0);
@@ -49,7 +49,7 @@ TEST(PositionKeeper, PartialSellReducesQtyKeepsAvgPrice) {
   buy(pk, "AAPL", 10.0, 150.0);
   sell(pk, "AAPL", 4.0, 160.0); // reducing; avg price must stay 150
 
-  auto pos = pk.getPosition("AAPL");
+  auto pos = pk.get_position("AAPL");
   ASSERT_TRUE(pos.has_value());
   EXPECT_DOUBLE_EQ(pos->quantity(), 6.0);
   EXPECT_DOUBLE_EQ(pos->avg_price(), 150.0);
@@ -60,7 +60,7 @@ TEST(PositionKeeper, FullSellFlattensPosition) {
   buy(pk, "AAPL", 10.0, 150.0);
   sell(pk, "AAPL", 10.0, 160.0); // position goes to zero
 
-  auto pos = pk.getPosition("AAPL");
+  auto pos = pk.get_position("AAPL");
   ASSERT_TRUE(pos.has_value());
   EXPECT_DOUBLE_EQ(pos->quantity(), 0.0);
   EXPECT_DOUBLE_EQ(pos->avg_price(), 0.0);
@@ -71,7 +71,7 @@ TEST(PositionKeeper, SellBeyondFlatFlipsToShort) {
   buy(pk, "AAPL", 5.0, 100.0);
   sell(pk, "AAPL", 10.0, 120.0); // flips: net = -5, avg = fill price
 
-  auto pos = pk.getPosition("AAPL");
+  auto pos = pk.get_position("AAPL");
   ASSERT_TRUE(pos.has_value());
   EXPECT_DOUBLE_EQ(pos->quantity(), -5.0);
   EXPECT_DOUBLE_EQ(pos->avg_price(), 120.0);
@@ -80,7 +80,7 @@ TEST(PositionKeeper, SellBeyondFlatFlipsToShort) {
 TEST(PositionKeeper, ZeroFillQtyIsIgnored) {
   PositionKeeper pk;
   pk.on_fill("AAPL", 0.0, 150.0, v1::Side::BUY);
-  EXPECT_FALSE(pk.getPosition("AAPL").has_value());
+  EXPECT_FALSE(pk.get_position("AAPL").has_value());
 }
 
 TEST(PositionKeeper, ZeroFillPriceUpdatesQtyOnly) {
@@ -89,7 +89,7 @@ TEST(PositionKeeper, ZeroFillPriceUpdatesQtyOnly) {
   // Paper gateway may omit price; qty should update, avg must not change
   pk.on_fill("AAPL", 5.0, 0.0, v1::Side::BUY);
 
-  auto pos = pk.getPosition("AAPL");
+  auto pos = pk.get_position("AAPL");
   ASSERT_TRUE(pos.has_value());
   EXPECT_DOUBLE_EQ(pos->quantity(), 15.0);
   EXPECT_DOUBLE_EQ(pos->avg_price(), 150.0); // unchanged
@@ -100,7 +100,7 @@ TEST(PositionKeeper, GetAllPositionsReturnsAllSymbols) {
   buy(pk, "AAPL", 10.0, 150.0);
   buy(pk, "MSFT", 5.0, 300.0);
 
-  auto all = pk.getAllPositions();
+  auto all = pk.get_all_positions();
   EXPECT_EQ(all.positions_size(), 2);
 }
 
@@ -108,7 +108,7 @@ TEST(PositionKeeper, ShortPositionFromScratch) {
   PositionKeeper pk;
   sell(pk, "TSLA", 3.0, 200.0);
 
-  auto pos = pk.getPosition("TSLA");
+  auto pos = pk.get_position("TSLA");
   ASSERT_TRUE(pos.has_value());
   EXPECT_DOUBLE_EQ(pos->quantity(), -3.0);
   EXPECT_DOUBLE_EQ(pos->avg_price(), 200.0);

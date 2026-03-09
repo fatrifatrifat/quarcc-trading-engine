@@ -202,8 +202,16 @@ SQLiteOrderStore::update_fill_info(const std::string &local_id,
   std::lock_guard lock(mutex_);
 
   const char *sql = R"(
-    UPDATE orders 
-    SET filled_quantity = ?, avg_fill_price = ?, updated_at = datetime('now')
+    UPDATE orders
+    SET
+      avg_fill_price =
+        CASE
+          WHEN filled_quantity = 0 THEN ?
+          ELSE (avg_fill_price * filled_quantity + ? * ?) /
+               (filled_quantity + ?)
+        END,
+      filled_quantity = filled_quantity + ?,
+      updated_at = datetime('now')
     WHERE local_id = ?
   )";
 
@@ -216,9 +224,13 @@ SQLiteOrderStore::update_fill_info(const std::string &local_id,
                                  ErrorType::Error});
   }
 
-  sqlite3_bind_double(stmt, 1, filled_quantity);
+  // TODO: Verify if this is the right values for the placeholders
+  sqlite3_bind_double(stmt, 1, avg_price);
   sqlite3_bind_double(stmt, 2, avg_price);
-  sqlite3_bind_text(stmt, 3, local_id.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_double(stmt, 3, filled_quantity);
+  sqlite3_bind_double(stmt, 4, filled_quantity);
+  sqlite3_bind_double(stmt, 5, filled_quantity);
+  sqlite3_bind_text(stmt, 6, local_id.c_str(), -1, SQLITE_TRANSIENT);
 
   rc = sqlite3_step(stmt);
   sqlite3_finalize(stmt);
