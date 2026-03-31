@@ -3,6 +3,7 @@
 #include <trading/core/order_manager.h>
 #include <yaml-cpp/yaml.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -19,16 +20,27 @@ struct NetworkConfig {
 };
 
 struct DatabaseConfig {
-  std::string journal = "default_journal";
-  std::string orders = "default_orders";
+  std::string journal = "trading_journal";
+  std::string orders = "trading_orders";
+};
+
+struct MarketDataSubscription {
+  Symbol symbol;
+  BarPeriod period; // e.g. "1m", "5m", "1d"
+};
+
+struct MarketDataConfig {
+  std::string feed; // "alpaca", "csv", "simulated"
+  std::vector<MarketDataSubscription> subscriptions;
 };
 
 struct StrategyConfig {
   std::string id;
-  int polling_interval_ms{};
   std::string account_id;
   std::string gateway;
   DatabaseConfig database;
+  // Optional: not all strategies need market data from the engine
+  std::optional<MarketDataConfig> market_data;
 };
 
 struct Config {
@@ -41,8 +53,11 @@ static inline DatabaseConfig parse_database(const std::string &id,
                                             const YAML::Node &dbNode) {
   DatabaseConfig db;
 
-  if (!dbNode)
+  if (!dbNode) {
+    db.journal = std::format("{}_{}.db", id, db.journal);
+    db.orders = std::format("{}_{}.db", id, db.orders);
     return db;
+  }
 
   if (dbNode["journal"])
     db.journal =
@@ -67,11 +82,23 @@ inline Config parse_config(const std::string &path) {
   for (const auto &node : root["strategies"]) {
     StrategyConfig s;
     s.id = node["id"].as<std::string>();
-    s.polling_interval_ms = node["polling_interval_ms"].as<int>();
     s.account_id = node["account_id"].as<std::string>();
     s.gateway = node["gateway"].as<std::string>();
-
     s.database = parse_database(s.id, node["database"]);
+
+    if (node["market_data"]) {
+      MarketDataConfig md;
+      md.feed = node["market_data"]["feed"].as<std::string>();
+
+      for (const auto &sub : node["market_data"]["subscriptions"]) {
+        md.subscriptions.push_back({
+            sub["symbol"].as<std::string>(),
+            sub["period"].as<std::string>(),
+        });
+      }
+
+      s.market_data = std::move(md);
+    }
 
     cfg.strategies.push_back(std::move(s));
   }

@@ -10,6 +10,6 @@ message ExecutionReport {
   Side side = 3;
   double filled_quantity = 4;
   double avg_fill_price = 5;
-  string execution_id = 6;
-  string fill_time = 7;
+  string fill_time = 6;
+  // string execution_id = 7;
 }

@@ -75,11 +75,11 @@ TEST_F(OrderStoreFixture, GetOpenOrdersReturnsOnlyNonTerminalOrders) {
 
   auto open = store.get_open_orders();
 
-  // FILLED order must not appear in open orders.
+  // FILLED order must not appear in open orders
   for (const auto &o : open)
     EXPECT_NE(o.local_id, "CLOSED");
 
-  // Both open orders must be present.
+  // Both open orders must be present
   bool found_open1 = false, found_open2 = false;
   for (const auto &o : open) {
     if (o.local_id == "OPEN_1") found_open1 = true;

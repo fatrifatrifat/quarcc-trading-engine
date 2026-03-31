@@ -6,6 +6,7 @@
 
 namespace quarcc {
 
+// TODO: Add error types lmao
 enum class ErrorType : std::uint8_t {
   Error,
   FailedOrder,

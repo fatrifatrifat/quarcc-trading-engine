@@ -53,6 +53,11 @@ private:
                                     const v1::KillSwitchRequest *request,
                                     v1::Empty *response) override;
 
+    grpc::Status
+    StreamMarketData(grpc::ServerContext *context,
+                     const v1::SubscribeMarketDataRequest *request,
+                     grpc::ServerWriter<v1::MarketDataEvent> *writer) override;
+
   private:
     gRPCServer *owner_ = nullptr;
   };

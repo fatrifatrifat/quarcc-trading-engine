@@ -10,6 +10,7 @@ set(TRADING_PROTO_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/strategy_signal.proto
     ${CMAKE_CURRENT_SOURCE_DIR}/order.proto
     ${CMAKE_CURRENT_SOURCE_DIR}/execution.proto
+    ${CMAKE_CURRENT_SOURCE_DIR}/market_data.proto
     ${CMAKE_CURRENT_SOURCE_DIR}/execution_service.proto
 )
 

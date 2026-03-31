@@ -14,7 +14,25 @@ public:
   MOCK_METHOD(Result<BrokerOrderId>, replace_order,
               (const BrokerOrderId &orderId, const v1::Order &new_order),
               (override));
-  MOCK_METHOD(std::vector<v1::ExecutionReport>, get_fills, (), (override));
+
+  // Lifecycle and handler registration,implemented directly (not mocked)
+  // so trigger_fill can call the stored handler synchronously
+  void set_fill_handler(FillHandler h) override {
+    fill_handler_ = std::move(h);
+  }
+  void set_reject_handler(RejectHandler) override {}
+  void start() override {}
+  void stop() override {}
+
+  // Test helper: call the registered fill handler synchronously in the
+  // calling thread, making fill related tests deterministic without sleeps
+  void trigger_fill(const v1::ExecutionReport &report) {
+    if (fill_handler_)
+      fill_handler_(report);
+  }
+
+private:
+  FillHandler fill_handler_;
 };
 
 } // namespace quarcc

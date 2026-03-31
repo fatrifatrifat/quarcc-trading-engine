@@ -3,12 +3,8 @@
 #include <trading/persistence/sqlite_journal.h>
 #include <trading/persistence/sqlite_order_store.h>
 
-#include <chrono>
-
 namespace quarcc {
 
-// BUG TODO: qty/pnl rises to the roof (8 digits+) after ~1000-1500 signals,
-// investigate why/when/how, maybe caused by client.py
 void TradingEngine::Run(const char *config_path) {
   GOOGLE_PROTOBUF_VERIFY_VERSION;
 
@@ -16,16 +12,20 @@ void TradingEngine::Run(const char *config_path) {
     process_config(config_path);
   } catch (const std::exception &e) {
     std::cerr << "Config error: " << e.what() << std::endl;
+    return;
   }
 
+  feed_registry_.start_all();
   server_->start();
-  scheduler_.start();
 
-  // BUG TODO: cv instead of spinning
-  while (running_)
-    ;
+  // Block until ActivateKillSwitch() sets running_ = false and notifies
+  {
+    std::unique_lock lk{run_mu_};
+    run_cv_.wait(lk, [&] { return !running_.load(); });
+  }
 
   server_->shutdown();
+  feed_registry_.stop_all();
   google::protobuf::ShutdownProtobufLibrary();
 }
 
@@ -33,29 +33,27 @@ void TradingEngine::Run(const char *config_path) {
 Result<BrokerOrderId>
 TradingEngine::SubmitSignal(const v1::StrategySignal &signal) {
   auto it = managers_.find(signal.strategy_id());
-  if (it == managers_.end())
+  if (it == managers_.end()) [[unlikely]]
     return std::unexpected(Error{"Unknown strategy", ErrorType::Error});
-  return it->second->processSignal(signal);
+  return it->second->process_signal(signal);
 }
 
 Result<std::monostate>
 TradingEngine::CancelOrder(const v1::CancelSignal &signal) {
   auto it = managers_.find(signal.strategy_id());
-  if (it == managers_.end())
+  if (it == managers_.end()) [[unlikely]]
     return std::unexpected(Error{"Unknown strategy", ErrorType::Error});
-  return it->second->processSignal(signal);
+  return it->second->process_signal(signal);
 }
 
 Result<BrokerOrderId>
 TradingEngine::ReplaceOrder(const v1::ReplaceSignal &signal) {
   auto it = managers_.find(signal.strategy_id());
-  if (it == managers_.end())
+  if (it == managers_.end()) [[unlikely]]
     return std::unexpected(Error{"Unknown strategy", ErrorType::Error});
-  return it->second->processSignal(signal);
+  return it->second->process_signal(signal);
 }
 
-// Collects across all strategies, if multiple strategies hold the same symbol,
-// it sums up the quantity and makes an weighted average of the price
 Result<v1::Position>
 TradingEngine::GetPosition(const v1::GetPositionRequest &req) {
   v1::Position combined;
@@ -88,8 +86,6 @@ TradingEngine::GetPosition(const v1::GetPositionRequest &req) {
   return combined;
 }
 
-// Collects positions from every strategy and merges entries for the same symbol
-// (sum of quantities, weighted-average price)
 Result<v1::PositionList> TradingEngine::GetAllPositions(const v1::Empty &) {
   std::unordered_map<std::string, v1::Position> combined;
 
@@ -119,13 +115,38 @@ Result<v1::PositionList> TradingEngine::GetAllPositions(const v1::Empty &) {
   return result;
 }
 
-// Stops running, cancels all cancellable orders
+// Moving the handling and sending of data from the gRPCServer::StreamMarketData
+// function to the specific strategies
+Result<std::monostate>
+TradingEngine::SetupMarketDataStream(const std::string &strategy_id,
+                                     MarketDataSinks sinks) {
+  auto it = managers_.find(strategy_id);
+  if (it == managers_.end())
+    return std::unexpected(
+        Error{"Unknown strategy: " + strategy_id, ErrorType::Error});
+  it->second->set_market_data_sinks(std::move(sinks.on_tick),
+                                    std::move(sinks.on_bar));
+  return std::monostate{};
+}
+
+// Clear the handling and sending of data functions
+void TradingEngine::ClearMarketDataStream(const std::string &strategy_id) {
+  auto it = managers_.find(strategy_id);
+  if (it != managers_.end())
+    it->second->clear_market_data_sinks();
+}
+
 Result<std::monostate>
 TradingEngine::ActivateKillSwitch(const v1::KillSwitchRequest &req) {
   for (auto &[strategy_id, manager] : managers_)
     manager->cancel_all(req.reason(), req.initiated_by());
 
-  running_ = false;
+  {
+    std::lock_guard lk{run_mu_};
+    running_ = false;
+  }
+  run_cv_.notify_one();
+
   return std::monostate{};
 }
 
@@ -136,26 +157,34 @@ void TradingEngine::process_config(const std::string &path) {
     std::unique_ptr<IExecutionGateway> gateway;
 
     if (strat.gateway == "alpaca") {
+#if TRADING_ENABLE_ALPACA_SDK
       gateway = std::make_unique<AlpacaGateway>();
+#else
+      throw std::runtime_error(
+          "Alpaca gateway not compiled in (TRADING_ENABLE_ALPACA_SDK=OFF)");
+#endif
     } else if (strat.gateway == "paper trading") {
       gateway = std::make_unique<PaperGateway>();
     } else {
-      throw std::runtime_error("Invalid gateway");
+      throw std::runtime_error("Invalid gateway: " + strat.gateway);
     }
 
     managers_.emplace(
         StrategyId{strat.id},
-        OrderManager::CreateOrderManager(
+        OrderManager::create_order_manager(
             config.account_id, std::make_unique<PositionKeeper>(),
             std::move(gateway),
             std::make_unique<SQLiteJournal>(strat.database.journal),
             std::make_unique<SQLiteOrderStore>(strat.database.orders),
             std::make_unique<RiskManager>()));
 
-    auto interval = strat.polling_interval_ms;
-    auto &manager = managers_[strat.id];
-    scheduler_.add_strategy(strat.id, std::chrono::milliseconds{interval},
-                            [&manager] { manager->process_fills(); });
+    if (strat.market_data) {
+      OrderManager *om = managers_.at(strat.id).get();
+      FeedKey key{strat.market_data->feed, strat.account_id};
+
+      for (const auto &sub : strat.market_data->subscriptions)
+        feed_registry_.register_subscription(key, sub.symbol, sub.period, om);
+    }
   }
 
   server_ = std::make_unique<gRPCServer>(config.network.grpc.host_post, *this);

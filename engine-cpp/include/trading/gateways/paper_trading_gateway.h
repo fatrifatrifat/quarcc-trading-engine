@@ -2,7 +2,10 @@
 
 #include <trading/interfaces/i_execution_gateway.h>
 
+#include <atomic>
+#include <mutex>
 #include <random>
+#include <thread>
 
 namespace quarcc {
 
@@ -17,7 +20,7 @@ struct PaperGatewayConfig {
 };
 
 // Instant submission/cancelation/replacement/fills with custom local ids
-class PaperGateway : public IExecutionGateway {
+class PaperGateway final : public GatewayDispatchBase {
 public:
   PaperGateway();
 
@@ -25,9 +28,12 @@ public:
   Result<std::monostate> cancel_order(const BrokerOrderId &orderId) override;
   Result<BrokerOrderId> replace_order(const BrokerOrderId &orderId,
                                       const v1::Order &new_order) override;
-  std::vector<v1::ExecutionReport> get_fills() override;
+
+  void start() override;
+  void stop() override;
 
 private:
+  void simulate_fills();
   void advance_prices() noexcept;
   double get_or_init_price(const std::string &symbol) noexcept;
   void update_price(const std::string &symbol, double bid, double ask) noexcept;
@@ -48,9 +54,13 @@ private:
   std::mutex orders_mutex_;
   OrderIdGenerator id_gen_;
   std::unordered_map<std::string, PriceState> prices_;
+  // BUG TODO: rng_ is not thread safe
   std::mt19937 rng_{std::random_device{}()};
   std::normal_distribution<double> price_dist_{0.0, 1.0};
   PaperGatewayConfig config_;
+
+  std::thread simulation_thread_;
+  std::atomic<bool> running_{false};
 };
 
 } // namespace quarcc

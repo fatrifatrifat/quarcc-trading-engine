@@ -4,15 +4,24 @@ package quarcc.v1;
 
 import "common.proto";
 import "strategy_signal.proto";
+import "market_data.proto";
 
 service ExecutionService {
+  // Sending strategy signals
   rpc SubmitSignal(StrategySignal) returns (SubmitSignalResponse);
   rpc CancelOrder(CancelSignal) returns (CancelOrderResponse);
   rpc ReplaceOrder(ReplaceSignal) returns (ReplaceOrderResponse);
   rpc StreamSignals(stream StrategySignal) returns (stream SubmitSignalResponse);
+
+  // Getting positions from the PositionKeeper
   rpc GetPosition(GetPositionRequest) returns (Position);
   rpc GetAllPositions(Empty) returns (PositionList);
+
+  // Killswitch for all strategies
   rpc ActivateKillSwitch(KillSwitchRequest) returns (Empty);
+
+  // Streaming from server for live data (ticks/bars)
+  rpc StreamMarketData(SubscribeMarketDataRequest) returns (stream MarketDataEvent);
 }
 
 message SubmitSignalResponse {

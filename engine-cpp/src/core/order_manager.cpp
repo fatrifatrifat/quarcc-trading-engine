@@ -1,8 +1,9 @@
 #include <trading/core/order_manager.h>
+#include <trading/utils/event_queue.h>
 
 namespace quarcc {
 
-std::unique_ptr<OrderManager> OrderManager::CreateOrderManager(
+std::unique_ptr<OrderManager> OrderManager::create_order_manager(
     std::string account_id, std::unique_ptr<PositionKeeper> pk,
     std::unique_ptr<IExecutionGateway> gw, std::unique_ptr<IJournal> lj,
     std::unique_ptr<IOrderStore> os, std::unique_ptr<RiskManager> rm) {
@@ -11,9 +12,163 @@ std::unique_ptr<OrderManager> OrderManager::CreateOrderManager(
                        std::move(lj), std::move(os), std::move(rm)));
 }
 
+OrderManager::OrderManager(std::string account_id,
+                           std::unique_ptr<PositionKeeper> pk,
+                           std::unique_ptr<IExecutionGateway> gw,
+                           std::unique_ptr<IJournal> lj,
+                           std::unique_ptr<IOrderStore> os,
+                           std::unique_ptr<RiskManager> rm)
+    : account_id_(std::move(account_id)), position_keeper_(std::move(pk)),
+      gateway_(std::move(gw)), journal_(std::move(lj)),
+      order_store_(std::move(os)), risk_manager_(std::move(rm)),
+      id_generator_(std::make_unique<OrderIdGenerator>()),
+      id_mapper_(std::make_unique<OrderIdMapper>()) {
+  gateway_->set_fill_handler(
+      [this](const v1::ExecutionReport &r) { enqueue(r); });
+
+  dispatch_thread_ =
+      std::jthread([this](std::stop_token st) { run_dispatch_loop(st); });
+
+  gateway_->start();
+}
+
+// Shutdown order:
+//  1. Shutdown the gateway, so it pushes all the remaining fills to the OM's
+//  queue
+//  2. dispatch_thread_ joins and cleans the queue up
+//  3. OM gets destroyed
+OrderManager::~OrderManager() { gateway_->stop(); }
+
+void OrderManager::enqueue(OMEvent event) { queue_.push(std::move(event)); }
+
+void OrderManager::wait_idle() { queue_.wait_idle(); }
+
+void OrderManager::run_dispatch_loop(std::stop_token st) {
+  OMEvent event;
+  while (queue_.pop(event, st)) {
+    std::visit(overloaded{
+                   [this](const v1::ExecutionReport &r) { handle_fill(r); },
+                   [this](const Bar &b) { handle_bar(b); },
+                   [this](const Tick &t) { handle_tick(t); },
+                   [this](RetryFillsEvent) { handle_retry_fills(); },
+               },
+               event);
+    queue_.mark_processed();
+  }
+}
+
+// Dispatch handlers. ONLY CALLED BY THE DISPATCH THREAD!
+
+// Steps:
+//  1. Resolve broker -> local ID (defer on miss)
+//  2. Fetch stored order to compare filled vs original quantity
+//  3. Persist fill details
+//  4. Determine and persist FILLED or PARTIALLY_FILLED status
+//  5. Update in-memory position
+//  6. Journal the event
+//  7. Remove fully-filled orders from the mapper (terminal)
+void OrderManager::handle_fill(const v1::ExecutionReport &fill) {
+  const std::string &broker_id = fill.broker_order_id();
+
+  // 1. Resolve broker -> local ID
+  auto local_id_opt = id_mapper_->get_local_id(broker_id);
+  if (!local_id_opt) {
+    // id_mapper_ didn't register the order's id yet, so we'll handle the fill
+    // later
+    deferred_fills_.push_back(fill);
+    return;
+  }
+  const std::string &local_id = *local_id_opt;
+
+  // 2. Fetch the stored order to determine full vs partial fill
+  auto stored = order_store_->get_order(local_id);
+  if (!stored) {
+    journal_->log(Event::ERROR_OCCURRED,
+                  "Cannot find stored order for local_id: " + local_id,
+                  local_id);
+    return;
+  }
+
+  const double filled_qty = fill.filled_quantity();
+  const double original_qty = stored->order.quantity();
+
+  // 3. Persist fill details
+  if (auto r = order_store_->update_fill_info(local_id, filled_qty,
+                                              fill.avg_fill_price());
+      !r) {
+    journal_->log(Event::ERROR_OCCURRED, r.error().message_, local_id);
+  }
+
+  // 4. Determine and persist the new order status
+  const bool fully_filled =
+      (stored->filled_quantity + filled_qty >= original_qty);
+  const OrderStatus new_status =
+      fully_filled ? OrderStatus::FILLED : OrderStatus::PARTIALLY_FILLED;
+
+  if (auto r = order_store_->update_order_status(local_id, new_status); !r) {
+    journal_->log(Event::ERROR_OCCURRED, r.error().message_, local_id);
+  }
+
+  // 5. Update in-memory position
+  position_keeper_->on_fill(fill.symbol(), filled_qty, fill.avg_fill_price(),
+                            fill.side());
+
+  // 6. Journal the event
+  const std::string log_data =
+      std::format("Filled: {} / {} @ avg={}", filled_qty, original_qty,
+                  fill.avg_fill_price());
+
+  journal_->log(fully_filled ? Event::ORDER_FILLED
+                             : Event::ORDER_PARTIALLY_FILLED,
+                log_data, local_id);
+
+  // 7. Remove fully-filled orders from the mapper since they're completely
+  // filled
+  if (fully_filled)
+    id_mapper_->remove_mapping(local_id);
+}
+
+void OrderManager::handle_bar(const Bar &bar) {
+  std::lock_guard lk{md_sink_mu_};
+  if (bar_sink_) [[likely]]
+    bar_sink_(bar);
+}
+
+void OrderManager::handle_tick(const Tick &tick) {
+  std::lock_guard lk{md_sink_mu_};
+  if (tick_sink_) [[likely]]
+    tick_sink_(tick);
+}
+
+void OrderManager::set_market_data_sinks(
+    std::function<void(const Tick &)> tick_sink,
+    std::function<void(const Bar &)> bar_sink) {
+  std::lock_guard lk{md_sink_mu_};
+  tick_sink_ = std::move(tick_sink);
+  bar_sink_ = std::move(bar_sink);
+}
+
+void OrderManager::clear_market_data_sinks() {
+  std::lock_guard lk{md_sink_mu_};
+  tick_sink_ = nullptr;
+  bar_sink_ = nullptr;
+}
+
+void OrderManager::handle_retry_fills() {
+  // Drain deferred_fills_ into handle_fill(). Fills that still can't resolve
+  // (unlikely but possible if multiple orders are in flight) go back into
+  // deferred_fills_ via handle_fill()'s defer path
+  auto to_retry = std::move(deferred_fills_);
+  deferred_fills_.clear();
+  for (const auto &fill : to_retry)
+    handle_fill(fill);
+}
+
+// All the processing of the signals that runs concurrently to the dispatch
+// thread. Each component of the OM should be thread safe
+
 Result<LocalOrderId>
-OrderManager::processSignal(const v1::StrategySignal &signal) {
-  // Create order
+OrderManager::process_signal(const v1::StrategySignal &signal) {
   std::string local_id = id_generator_->generate();
   v1::Order order = create_order_from_signal(signal);
   order.set_id(local_id);
@@ -25,61 +180,60 @@ OrderManager::processSignal(const v1::StrategySignal &signal) {
   stored.status = OrderStatus::PENDING_SUBMISSION;
   stored.created_at = LogEntry::timestamp_to_string(LogEntry::now());
 
-  if (auto store_result = order_store_->store_order(stored); !store_result) {
-    journal_->log(Event::ERROR_OCCURRED, store_result.error().message_,
-                  local_id);
-    return std::unexpected(store_result.error());
+  if (auto r = order_store_->store_order(stored); !r) {
+    journal_->log(Event::ERROR_OCCURRED, r.error().message_, local_id);
+    return std::unexpected(r.error());
   }
 
   // TODO: Risk check
 
-  // Submit to gateway
   auto result = gateway_->submit_order(order);
   if (!result) {
     journal_->log(Event::ORDER_REJECTED, result.error().message_, local_id);
-    if (auto result =
+    if (auto r =
             order_store_->update_order_status(local_id, OrderStatus::REJECTED);
-        !result) {
-      journal_->log(Event::ERROR_OCCURRED, result.error().message_, local_id);
-      return std::unexpected(result.error());
+        !r) {
+      journal_->log(Event::ERROR_OCCURRED, r.error().message_, local_id);
+      return std::unexpected(r.error());
     }
     return result;
   }
 
   std::string broker_id = result.value();
 
-  // Set SUBMITTED in the DB *before* add_mapping() makes this order visible to
-  // the fill-poll thread. Without this ordering, the poll thread can process
-  // the fill and set status=FILLED, and then this thread's update_order_status
-  // call below would overwrite it back to SUBMITTED, permanently sticking the
-  // order.
-  if (auto result =
+  // Set SUBMITTED before add_mapping() makes this order visible to the
+  // dispatch thread. Without this ordering, a fill could arrive and set
+  // status=FILLED, then this update would overwrite it back to SUBMITTED
+  if (auto r =
           order_store_->update_order_status(local_id, OrderStatus::SUBMITTED);
-      !result) {
-    journal_->log(Event::ERROR_OCCURRED, result.error().message_, local_id);
-    return std::unexpected(result.error());
+      !r) {
+    journal_->log(Event::ERROR_OCCURRED, r.error().message_, local_id);
+    return std::unexpected(r.error());
   }
 
   id_mapper_->add_mapping(local_id, broker_id);
 
-  if (auto result = order_store_->update_broker_id(local_id, broker_id);
-      !result) {
-    journal_->log(Event::ERROR_OCCURRED, result.error().message_, local_id);
-    return std::unexpected(result.error());
+  // Signal the dispatch thread to retry any fills that arrived before the
+  // mapping was established (the deferred fill race window)
+  enqueue(RetryFillsEvent{});
+
+  if (auto r = order_store_->update_broker_id(local_id, broker_id); !r) {
+    journal_->log(Event::ERROR_OCCURRED, r.error().message_, local_id);
+    return std::unexpected(r.error());
   }
 
-  std::string log_data = "Local: " + local_id + ", Broker: " + broker_id;
-  journal_->log(Event::ORDER_SUBMITTED, log_data, local_id);
+  journal_->log(Event::ORDER_SUBMITTED,
+                "Local: " + local_id + ", Broker: " + broker_id, local_id);
 
   return local_id;
 }
 
 Result<std::monostate>
-OrderManager::processSignal(const v1::CancelSignal &signal) {
+OrderManager::process_signal(const v1::CancelSignal &signal) {
   std::string local_id = signal.order_id();
 
   auto broker_id = id_mapper_->get_broker_id(local_id);
-  if (!broker_id) {
+  if (!broker_id) [[unlikely]] {
     return std::unexpected(Error{"Cannot find broker ID for order: " + local_id,
                                  ErrorType::Error});
   }
@@ -88,14 +242,12 @@ OrderManager::processSignal(const v1::CancelSignal &signal) {
 
   if (result) {
     journal_->log(Event::ORDER_CANCELLED, "Cancelled", local_id);
-    // id_mapper_->remove_mapping(local_id); TODO: Removal after a grace period
-    // (to wait for the execution to complete)
     id_mapper_->remove_mapping(local_id);
-    if (auto result =
+    if (auto r =
             order_store_->update_order_status(local_id, OrderStatus::CANCELLED);
-        !result) {
-      journal_->log(Event::ERROR_OCCURRED, result.error().message_, local_id);
-      return std::unexpected(result.error());
+        !r) {
+      journal_->log(Event::ERROR_OCCURRED, r.error().message_, local_id);
+      return std::unexpected(r.error());
     }
   }
 
@@ -103,17 +255,16 @@ OrderManager::processSignal(const v1::CancelSignal &signal) {
 }
 
 Result<LocalOrderId>
-OrderManager::processSignal(const v1::ReplaceSignal &signal) {
+OrderManager::process_signal(const v1::ReplaceSignal &signal) {
   std::string old_local_id = signal.order_id();
 
   auto old_broker_id = id_mapper_->get_broker_id(old_local_id);
-  if (!old_broker_id) {
+  if (!old_broker_id) [[unlikely]] {
     return std::unexpected(Error{
         "Cannot find broker ID for order: " + old_local_id, ErrorType::Error});
   }
 
   std::string new_local_id = id_generator_->generate();
-
   v1::Order new_order = create_order_from_signal(signal);
   new_order.set_id(new_local_id);
 
@@ -129,14 +280,16 @@ OrderManager::processSignal(const v1::ReplaceSignal &signal) {
 
   std::string new_broker_id = result.value();
   id_mapper_->remove_mapping(old_local_id);
-  id_mapper_->add_mapping(new_local_id, new_broker_id);
 
-  if (auto result = order_store_->update_order_status(old_local_id,
-                                                      OrderStatus::REPLACED);
-      !result) {
-    journal_->log(Event::ERROR_OCCURRED, result.error().message_, old_local_id);
-    return std::unexpected(result.error());
+  if (auto r = order_store_->update_order_status(old_local_id,
+                                                 OrderStatus::REPLACED);
+      !r) {
+    journal_->log(Event::ERROR_OCCURRED, r.error().message_, old_local_id);
+    return std::unexpected(r.error());
   }
+
+  id_mapper_->add_mapping(new_local_id, new_broker_id);
+  enqueue(RetryFillsEvent{});
 
   StoredOrder stored;
   stored.order = new_order;
@@ -145,103 +298,19 @@ OrderManager::processSignal(const v1::ReplaceSignal &signal) {
   stored.status = OrderStatus::SUBMITTED;
   stored.created_at = LogEntry::timestamp_to_string(LogEntry::now());
 
-  if (auto store_result = order_store_->store_order(stored); !store_result) {
-    journal_->log(Event::ERROR_OCCURRED, store_result.error().message_,
-                  new_local_id);
-    return std::unexpected(store_result.error());
+  if (auto r = order_store_->store_order(stored); !r) {
+    journal_->log(Event::ERROR_OCCURRED, r.error().message_, new_local_id);
+    return std::unexpected(r.error());
   }
 
-  std::string log_data = std::format("Old: {} -> New: {} (Broker: {})",
-                                     old_local_id, new_local_id, new_broker_id);
-
-  journal_->log(Event::ORDER_SUBMITTED, log_data, new_local_id);
+  journal_->log(Event::ORDER_SUBMITTED,
+                std::format("Old: {} -> New: {} (Broker: {})", old_local_id,
+                            new_local_id, new_broker_id),
+                new_local_id);
 
   return new_local_id;
 }
 
-// TradingEngine::Run(). Asks the gateway for any fills that arrived since the
-// last poll, then for each ExecutionReport:
-//   1. Resolves the local order ID via the bidirectional ID mapper.
-//   2. Fetches the stored order to compare filled vs original quantity.
-//   3. Updates fill info (quantity, avg price) in the order store.
-//   4. Sets the order status to FILLED or PARTIALLY_FILLED.
-//   5. Calls position_keeper_->on_fill() so positions stay up to date.
-//   6. Journals the event.
-//   7. Removes fully-filled orders from the ID mapper (they're terminal).
-void OrderManager::process_fills() {
-  auto fills = gateway_->get_fills();
-
-  // Prepend any fills that were deferred last cycle due to the submit/fill
-  // race (mapping not yet established when the fill arrived).
-  fills.insert(fills.begin(), deferred_fills_.begin(), deferred_fills_.end());
-  deferred_fills_.clear();
-
-  for (const auto &fill : fills) {
-    const std::string &broker_id = fill.broker_order_id();
-
-    // 1. Resolve broker → local ID
-    auto local_id_opt = id_mapper_->get_local_id(broker_id);
-    if (!local_id_opt) {
-      // The mapping may not be established yet (submit_order returned but
-      // add_mapping hasn't run). Retry next cycle instead of discarding.
-      deferred_fills_.push_back(fill);
-      continue;
-    }
-    const std::string &local_id = *local_id_opt;
-
-    // 2. Fetch the stored order to determine full vs partial fill
-    auto stored = order_store_->get_order(local_id);
-    if (!stored) {
-      journal_->log(Event::ERROR_OCCURRED,
-                    "Cannot find stored order for local_id: " + local_id,
-                    local_id);
-      continue;
-    }
-
-    const double filled_qty = fill.filled_quantity();
-    const double original_qty = stored->order.quantity();
-
-    // 3. Persist fill details
-    if (auto r = order_store_->update_fill_info(local_id, filled_qty,
-                                                fill.avg_fill_price());
-        !r) {
-      journal_->log(Event::ERROR_OCCURRED, r.error().message_, local_id);
-    }
-
-    // BUG TODO: filled_qty = already filled qty + new filled_qty
-    // 4. Determine and persist the new order status
-    const bool fully_filled =
-        (stored->filled_quantity + filled_qty >= original_qty);
-    const OrderStatus new_status =
-        fully_filled ? OrderStatus::FILLED : OrderStatus::PARTIALLY_FILLED;
-
-    if (auto r = order_store_->update_order_status(local_id, new_status); !r) {
-      journal_->log(Event::ERROR_OCCURRED, r.error().message_, local_id);
-    }
-
-    // 5. Update in-memory position
-    position_keeper_->on_fill(fill.symbol(), filled_qty, fill.avg_fill_price(),
-                              fill.side());
-
-    // 6. Journal the event
-    const std::string log_data =
-        std::format("Filled: {} / {} @ avg={}", filled_qty, original_qty,
-                    fill.avg_fill_price());
-
-    journal_->log(fully_filled ? Event::ORDER_FILLED
-                               : Event::ORDER_PARTIALLY_FILLED,
-                  log_data, local_id);
-
-    // 7. Remove fully-filled orders from the mapper — they are terminal
-    if (fully_filled)
-      id_mapper_->remove_mapping(local_id);
-  }
-}
-
-// Iterates every open order from the order store, attempts a gateway
-// cancellation for each one that has a broker ID, and updates the store and
-// journal regardless of whether the gateway call succeeds (best-effort during
-// an emergency shutdown).
 void OrderManager::cancel_all(const std::string &reason,
                               const std::string &initiated_by) {
   const std::string ks_data =
@@ -256,16 +325,15 @@ void OrderManager::cancel_all(const std::string &reason,
     if (auto r = gateway_->cancel_order(*stored.broker_id); r) {
       if (auto r = order_store_->update_order_status(stored.local_id,
                                                      OrderStatus::CANCELLED);
-          !r) {
+          !r) [[unlikely]] {
         journal_->log(Event::ERROR_OCCURRED, r.error().message_,
                       stored.local_id);
         continue;
       }
-
       id_mapper_->remove_mapping(stored.local_id);
       journal_->log(Event::ORDER_CANCELLED, "Cancelled by kill switch",
                     stored.local_id);
-    } else {
+    } else [[unlikely]] {
       journal_->log(Event::ERROR_OCCURRED,
                     "Failed to cancel during kill switch: " +
                         r.error().message_,
@@ -283,18 +351,6 @@ v1::PositionList OrderManager::get_all_positions() const {
   return position_keeper_->get_all_positions();
 }
 
-OrderManager::OrderManager(std::string account_id,
-                           std::unique_ptr<PositionKeeper> pk,
-                           std::unique_ptr<IExecutionGateway> gw,
-                           std::unique_ptr<IJournal> lj,
-                           std::unique_ptr<IOrderStore> os,
-                           std::unique_ptr<RiskManager> rm)
-    : account_id_(std::move(account_id)), position_keeper_(std::move(pk)),
-      gateway_(std::move(gw)), journal_(std::move(lj)),
-      order_store_(std::move(os)), risk_manager_(std::move(rm)),
-      id_generator_(std::make_unique<OrderIdGenerator>()),
-      id_mapper_(std::make_unique<OrderIdMapper>()) {}
-
 v1::Order
 OrderManager::create_order_from_signal(const v1::StrategySignal &signal) {
   v1::Order order;
@@ -306,7 +362,6 @@ OrderManager::create_order_from_signal(const v1::StrategySignal &signal) {
   order.set_created_at(get_current_time());
   order.set_time_in_force(v1::TimeInForce::DAY);
   order.set_strategy_id(signal.strategy_id());
-  // order.metadata(). = signal.metadata(); // TODO: Copy metadata from signal
   return order;
 }
 
@@ -321,7 +376,6 @@ OrderManager::create_order_from_signal(const v1::ReplaceSignal &signal) {
   order.set_created_at(get_current_time());
   order.set_time_in_force(v1::TimeInForce::DAY);
   order.set_strategy_id(signal.strategy_id());
-  // order.metadata(). = signal.metadata(); // TODO: Copy metadata from signal
   return order;
 }
 

@@ -69,7 +69,7 @@ PositionKeeper::get_position(const std::string &symbol) const {
   std::shared_lock lock(mutex_);
 
   auto it = positions_.find(symbol);
-  if (it == positions_.end()) {
+  if (it == positions_.end()) [[unlikely]] {
     return std::unexpected(Error{"Position not found", ErrorType::Error});
   }
 

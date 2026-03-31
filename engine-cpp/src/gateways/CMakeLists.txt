@@ -1,9 +1,13 @@
 cmake_minimum_required(VERSION 3.24)
 
 set(GATEWAY_SOURCES
-    alpaca_fix_gateway.cpp
     paper_trading_gateway.cpp
+    simulated_feed.cpp
 )
+
+if(TRADING_ENABLE_ALPACA_SDK)
+    list(APPEND GATEWAY_SOURCES alpaca_fix_gateway.cpp)
+endif()
 
 set(_HAS_FIX 0)
 set(_HAS_WS 0)
