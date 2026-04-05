@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package quarcc.v1;
+
+import "common.proto";
+import "order.proto";
+import "execution.proto";
+import "market_data.proto";
+
+// Submit signal
+message AdapterSubmitRequest {
+  // Maps broker id to strategy id, so when a fill comes, it knows which strategy to signal for the fill update, since multiple strategies can share the same adapter
+  string strategy_id = 1;
+  Order order = 2;
+}
+
+message AdapterSubmitResponse {
+  bool accepted = 1;
+  string broker_order_id = 2;
+  string rejection_reason = 3;
+}
+
+// Submit cancel
+message AdapterCancelRequest {
+  string strategy_id = 1;
+  string broker_order_id = 2;
+}
+
+message AdapterCancelResponse {
+  bool accepted = 1;
+  string rejection_reason = 2;
+}
+
+// Submit replace
+message AdapterReplaceRequest {
+  string strategy_id = 1;
+  string broker_order_id = 2;
+  Order new_order = 3;
+}
+
+message AdapterReplaceResponse {
+  bool accepted = 1;
+  string new_broker_order_id = 2;
+  string rejection_reason = 3;
+}
+
+// Requests fill update streaming for a specific strategy
+message StreamFillsRequest {
+  string strategy_id = 1;
+}
+
+// Describes all the subscriptions based on a singular symbol
+message SymbolSubscription {
+  string symbol = 1;
+  repeated string bar_periods = 2;
+}
+
+// Set of all different subscriptions across all symbols
+message AdapterMarketDataRequest {
+  repeated SymbolSubscription subscriptions = 1;
+}
+
+// Simple health ping to check if the connection to an adapter/broker has been made successfully
+message PingResponse {
+  bool ready = 1;
+  string status_message = 2;
+}
+
+// Implemented by each running python process
+// Unique per pair of venue (ibkr, binance, etc.) and account id
+service GatewayAdapterService {
+  rpc SubmitOrder (AdapterSubmitRequest) returns (AdapterSubmitResponse);
+  rpc CancelOrder (AdapterCancelRequest) returns (AdapterCancelResponse);
+  rpc ReplaceOrder (AdapterReplaceRequest) returns (AdapterReplaceResponse);
+
+  // Single RPC open per venue and account id pair
+  rpc StreamFills (StreamFillsRequest) returns (stream ExecutionReport);
+  rpc StreamMarketData (AdapterMarketDataRequest) returns (stream MarketDataEvent);
+  rpc Ping (Empty) returns (PingResponse);
+}

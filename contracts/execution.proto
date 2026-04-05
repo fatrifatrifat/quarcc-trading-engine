@@ -3,6 +3,7 @@ syntax = "proto3";
 package quarcc.v1;
 
 import "common.proto";
+import "order.proto";
 
 message ExecutionReport {
   string broker_order_id = 1;
@@ -11,5 +12,8 @@ message ExecutionReport {
   double filled_quantity = 4;
   double avg_fill_price = 5;
   string fill_time = 6;
-  // string execution_id = 7;
+  // ID assigned by the broker, this let's us not count deduplicated fill updates.
+  // In reconnect cases, some brokers resend the past few updates, storing this let's us not process them again
+  string execution_id = 7;
+  OrderStatus status = 8;
 }

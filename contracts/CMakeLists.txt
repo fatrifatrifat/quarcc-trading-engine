@@ -12,6 +12,7 @@ set(TRADING_PROTO_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/execution.proto
     ${CMAKE_CURRENT_SOURCE_DIR}/market_data.proto
     ${CMAKE_CURRENT_SOURCE_DIR}/execution_service.proto
+    ${CMAKE_CURRENT_SOURCE_DIR}/gateway_adapter_service.proto
 )
 
 set(TRADING_PROTO_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)

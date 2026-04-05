@@ -4,25 +4,25 @@ package quarcc.v1;
 
 // quote/trade tick
 message TickEvent {
-  string symbol       = 1;
-  double bid          = 2;
-  double ask          = 3;
-  double last         = 4;
-  double bid_size     = 5;
-  double ask_size     = 6;
-  double last_size    = 7;
+  string symbol = 1;
+  double bid = 2;
+  double ask = 3;
+  double last = 4;
+  double bid_size = 5;
+  double ask_size = 6;
+  double last_size = 7;
   int64  timestamp_ns = 8;
 }
 
 message BarEvent {
-  string symbol       = 1;
-  string period       = 2; // e.g. "5s", "1m", "1d"
-  double open         = 3;
-  double high         = 4;
-  double low          = 5;
-  double close        = 6;
-  double volume       = 7;
-  double vwap         = 8; // Volume Weighted Average Price
+  string symbol = 1;
+  string period = 2; // e.g. "5s", "1m", "1d"
+  double open = 3;
+  double high = 4;
+  double low = 5;
+  double close = 6;
+  double volume = 7;
+  double vwap = 8; // Volume Weighted Average Price
   int64  timestamp_ns = 9; // bar-open timestamp
 }
 
@@ -30,7 +30,7 @@ message BarEvent {
 message MarketDataEvent {
   oneof event {
     TickEvent tick = 1;
-    BarEvent  bar  = 2;
+    BarEvent bar = 2;
   }
 }
 
