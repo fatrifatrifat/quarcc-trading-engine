@@ -1,5 +1,6 @@
 #pragma once
 
+#include <trading/core/adapter_manager.h>
 #include <trading/core/feed_registry.h>
 #include <trading/core/order_manager.h>
 #if TRADING_ENABLE_ALPACA_SDK
@@ -44,6 +45,10 @@ private:
   std::mutex run_mu_;
   std::condition_variable run_cv_;
 
+  // adapter_manager_ must be declared before feed_registry_ and managers_:
+  // its destructor sends SIGTERM to adapters, which must happen after the
+  // feed and order manager threads have stopped
+  AdapterManager adapter_manager_;
   FeedRegistry feed_registry_;
 
   std::unique_ptr<gRPCServer> server_;

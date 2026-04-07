@@ -80,6 +80,25 @@ void OrderManager::handle_fill(const v1::ExecutionReport &fill) {
   }
   const std::string &local_id = *local_id_opt;
 
+  // 1b. Handle broker-side rejections and async cancellations.
+  // v1::OrderStatus defaults to NEW(0) for legacy fills (e.g. PaperGateway)
+  // that don't set the status field, which falls through to fill logic below.
+  const auto proto_status = fill.status();
+  if (proto_status == v1::OrderStatus::REJECTED ||
+      proto_status == v1::OrderStatus::CANCELLED) {
+    const OrderStatus new_status = (proto_status == v1::OrderStatus::REJECTED)
+                                       ? OrderStatus::REJECTED
+                                       : OrderStatus::CANCELLED;
+    if (auto r = order_store_->update_order_status(local_id, new_status); !r)
+      journal_->log(Event::ERROR_OCCURRED, r.error().message_, local_id);
+    journal_->log(proto_status == v1::OrderStatus::REJECTED
+                      ? Event::ORDER_REJECTED
+                      : Event::ORDER_CANCELLED,
+                  "Reported by gateway for broker_id: " + broker_id, local_id);
+    id_mapper_->remove_mapping(local_id);
+    return;
+  }
+
   // 2. Fetch the stored order to determine full vs partial fill
   auto stored = order_store_->get_order(local_id);
   if (!stored) {

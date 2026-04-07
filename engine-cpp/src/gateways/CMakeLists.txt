@@ -3,6 +3,8 @@ cmake_minimum_required(VERSION 3.24)
 set(GATEWAY_SOURCES
     paper_trading_gateway.cpp
     simulated_feed.cpp
+    grpc_gateway.cpp
+    grpc_market_data_feed.cpp
 )
 
 if(TRADING_ENABLE_ALPACA_SDK)

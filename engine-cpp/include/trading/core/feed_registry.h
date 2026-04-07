@@ -38,6 +38,12 @@ public:
   void register_subscription(FeedKey key, Symbol symbol, BarPeriod period,
                              OrderManager *om);
 
+  // Pre registers a feed. Skips create_feed entirely by passing in a
+  // IMarketDataFeed object from outside
+  void register_feed(FeedKey key, std::unique_ptr<IMarketDataFeed> feed);
+
+  bool has_feed(const FeedKey &key) const;
+
   void on_bar(const FeedKey &key, const Bar &bar);
   void on_tick(const FeedKey &key, const Tick &tick);
 

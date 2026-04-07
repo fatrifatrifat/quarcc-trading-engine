@@ -1,4 +1,6 @@
 #include <trading/core/trading_engine.h>
+#include <trading/gateways/grpc_gateway.h>
+#include <trading/gateways/grpc_market_data_feed.h>
 #include <trading/gateways/paper_trading_gateway.h>
 #include <trading/persistence/sqlite_journal.h>
 #include <trading/persistence/sqlite_order_store.h>
@@ -156,7 +158,17 @@ void TradingEngine::process_config(const std::string &path) {
   for (const auto &strat : config.strategies) {
     std::unique_ptr<IExecutionGateway> gateway;
 
-    if (strat.gateway == "alpaca") {
+    if (strat.gateway == "grpc_adapter") {
+      if (!strat.adapter)
+        throw std::runtime_error(
+            "Strategy '" + strat.id +
+            "' uses gateway 'grpc_adapter' but has no 'adapter' config block");
+
+      auto conn = adapter_manager_.get_or_create(
+          strat.adapter->venue, strat.account_id, *strat.adapter);
+      gateway = std::make_unique<GrpcGateway>(strat.id, conn);
+
+    } else if (strat.gateway == "alpaca") {
 #if TRADING_ENABLE_ALPACA_SDK
       gateway = std::make_unique<AlpacaGateway>();
 #else
@@ -180,10 +192,19 @@ void TradingEngine::process_config(const std::string &path) {
 
     if (strat.market_data) {
       OrderManager *om = managers_.at(strat.id).get();
-      FeedKey key{strat.market_data->feed, strat.account_id};
+      const FeedKey feed_key{strat.market_data->feed, strat.account_id};
+
+      if (strat.gateway == "grpc_adapter" && strat.adapter &&
+          !feed_registry_.has_feed(feed_key)) {
+        auto conn = adapter_manager_.get_or_create(
+            strat.adapter->venue, strat.account_id, *strat.adapter);
+        feed_registry_.register_feed(
+            feed_key, std::make_unique<GrpcMarketDataFeed>(std::move(conn)));
+      }
 
       for (const auto &sub : strat.market_data->subscriptions)
-        feed_registry_.register_subscription(key, sub.symbol, sub.period, om);
+        feed_registry_.register_subscription(feed_key, sub.symbol, sub.period,
+                                             om);
     }
   }
 

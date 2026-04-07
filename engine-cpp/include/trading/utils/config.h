@@ -34,10 +34,22 @@ struct MarketDataConfig {
   std::vector<MarketDataSubscription> subscriptions;
 };
 
+// Only when gateway == "grpc_adapter" in the config.yaml file
+struct AdapterConfig {
+  std::string venue; // "ibkr", "binance", "polymarket", "paper trading", etc.
+                     // (even tho none of them are implemented yet)
+  std::string binary_path;      // path to the Python adapter script
+  std::string credentials_path; // path to credentials YAML for this venue
+  int port{0};                  // port the adapter listens on (must be unique
+                                // per (venue, account_id) on this host)
+};
+
 struct StrategyConfig {
   std::string id;
   std::string account_id;
   std::string gateway;
+  std::optional<AdapterConfig>
+      adapter; // required when gateway == "grpc_adapter"
   DatabaseConfig database;
   // Optional: not all strategies need market data from the engine
   std::optional<MarketDataConfig> market_data;
@@ -85,6 +97,16 @@ inline Config parse_config(const std::string &path) {
     s.account_id = node["account_id"].as<std::string>();
     s.gateway = node["gateway"].as<std::string>();
     s.database = parse_database(s.id, node["database"]);
+
+    if (node["adapter"]) {
+      const auto &a = node["adapter"];
+      AdapterConfig ac;
+      ac.venue = a["venue"].as<std::string>();
+      ac.binary_path = a["binary"].as<std::string>();
+      ac.credentials_path = a["credentials"].as<std::string>();
+      ac.port = a["port"].as<int>();
+      s.adapter = std::move(ac);
+    }
 
     if (node["market_data"]) {
       MarketDataConfig md;

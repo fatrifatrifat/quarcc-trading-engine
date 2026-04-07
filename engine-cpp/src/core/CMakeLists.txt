@@ -7,6 +7,7 @@ add_library(trading_core STATIC
     risk_manager.cpp
     poll_scheduler.cpp
     feed_registry.cpp
+    adapter_manager.cpp
 )
 
 add_library(trading::core ALIAS trading_core)
