@@ -4,9 +4,34 @@ network:
     port: 50051
 
 strategies:
+  - id: "ibkr_strategy_1"
+    account_id: "ibkr_account_123"
+    gateway: "grpc_adapter"
+    adapter:
+      venue: "paper"
+      binary: "python_client/adapters/adapter.py"
+      credentials: "config/ibkr_creds.yaml"
+      port: 50100 # must be unique per (venue, account) on this host
+    database:
+      journal: "trading_journal"
+      orders:  "trading_orders"
+    market_data:
+      feed: "ibkr" # must match adapter.venue
+      subscriptions:
+        - symbol: "AAPL"
+          period: "1m"
+    test:
+      symbol: "PLTR"
+      iterations: 300
+      wait_secs: 3.0
+      flatten: true
+      orders:
+        - {side: BUY,  qty: 2.0}
+        - {side: BUY,  qty: 1.0}
+        - {side: BUY,  qty: 3.0}
   - id: "simple_test_strategy_1"
     account_id: "name_id0"
-    gateway: "paper trading"   # or "alpaca"
+    gateway: "paper trading" # or "alpaca"
     database:
       journal: "trading_journal"
       orders: "trading_orders"
@@ -25,103 +50,102 @@ strategies:
       orders:
         - {side: BUY,  qty: 2.0}
         - {side: BUY,  qty: 1.0}
+  # - id: "simple_test_strategy_2"
+  #   account_id: "name_id0"
+  #   gateway: "paper trading"
+  #   test:
+  #     symbol: "AAPL"
+  #     iterations: 30
+  #     wait_secs: 3.0
+  #     flatten: true
+  #     orders:
+  #       - {side: BUY,  qty: 4.0}
+  #       - {side: BUY,  qty: 6.0}
+  #       - {side: SELL, qty: 3.75}
 
-  - id: "simple_test_strategy_2"
-    account_id: "name_id0"
-    gateway: "paper trading"
-    test:
-      symbol: "AAPL"
-      iterations: 30
-      wait_secs: 3.0
-      flatten: true
-      orders:
-        - {side: BUY,  qty: 4.0}
-        - {side: BUY,  qty: 6.0}
-        - {side: SELL, qty: 3.75}
+  # - id: "simple_test_strategy_3"
+  #   account_id: "name_id0"
+  #   gateway: "paper trading"
+  #   test:
+  #     symbol: "PLTR"
+  #     iterations: 30
+  #     wait_secs: 3.0
+  #     flatten: true
+  #     orders:
+  #       - {side: BUY,  qty: 4.0}
+  #       - {side: BUY,  qty: 6.0}
+  #       - {side: SELL, qty: 3.75}
 
-  - id: "simple_test_strategy_3"
-    account_id: "name_id0"
-    gateway: "paper trading"
-    test:
-      symbol: "PLTR"
-      iterations: 30
-      wait_secs: 3.0
-      flatten: true
-      orders:
-        - {side: BUY,  qty: 4.0}
-        - {side: BUY,  qty: 6.0}
-        - {side: SELL, qty: 3.75}
+  # - id: "simple_test_strategy_4"
+  #   account_id: "name_id0"
+  #   gateway: "paper trading"
+  #   test:
+  #     symbol: "MSFT"
+  #     iterations: 30
+  #     wait_secs: 3.0
+  #     flatten: true
+  #     orders:
+  #       - {side: BUY,  qty: 3.0}
+  #       - {side: SELL, qty: 2.0}
 
-  - id: "simple_test_strategy_4"
-    account_id: "name_id0"
-    gateway: "paper trading"
-    test:
-      symbol: "MSFT"
-      iterations: 30
-      wait_secs: 3.0
-      flatten: true
-      orders:
-        - {side: BUY,  qty: 3.0}
-        - {side: SELL, qty: 2.0}
+  # - id: "simple_test_strategy_5"
+  #   account_id: "name_id0"
+  #   gateway: "paper trading"
+  #   test:
+  #     symbol: "GOOGL"
+  #     iterations: 30
+  #     wait_secs: 3.0
+  #     flatten: true
+  #     orders:
+  #       - {side: BUY,  qty: 5.0}
+  #       - {side: SELL, qty: 3.0}
 
-  - id: "simple_test_strategy_5"
-    account_id: "name_id0"
-    gateway: "paper trading"
-    test:
-      symbol: "GOOGL"
-      iterations: 30
-      wait_secs: 3.0
-      flatten: true
-      orders:
-        - {side: BUY,  qty: 5.0}
-        - {side: SELL, qty: 3.0}
+  # - id: "simple_test_strategy_6"
+  #   account_id: "name_id0"
+  #   gateway: "paper trading"
+  #   test:
+  #     symbol: "AMZN"
+  #     iterations: 30
+  #     wait_secs: 3.0
+  #     flatten: true
+  #     orders:
+  #       - {side: BUY,  qty: 2.0}
+  #       - {side: BUY,  qty: 3.0}
+  #       - {side: SELL, qty: 4.0}
 
-  - id: "simple_test_strategy_6"
-    account_id: "name_id0"
-    gateway: "paper trading"
-    test:
-      symbol: "AMZN"
-      iterations: 30
-      wait_secs: 3.0
-      flatten: true
-      orders:
-        - {side: BUY,  qty: 2.0}
-        - {side: BUY,  qty: 3.0}
-        - {side: SELL, qty: 4.0}
+  # - id: "simple_test_strategy_7"
+  #   account_id: "name_id0"
+  #   gateway: "paper trading"
+  #   test:
+  #     symbol: "NVDA"
+  #     iterations: 30
+  #     wait_secs: 3.0
+  #     flatten: true
+  #     orders:
+  #       - {side: BUY,  qty: 1.0}
+  #       - {side: SELL, qty: 1.0}
 
-  - id: "simple_test_strategy_7"
-    account_id: "name_id0"
-    gateway: "paper trading"
-    test:
-      symbol: "NVDA"
-      iterations: 30
-      wait_secs: 3.0
-      flatten: true
-      orders:
-        - {side: BUY,  qty: 1.0}
-        - {side: SELL, qty: 1.0}
+  # - id: "simple_test_strategy_8"
+  #   account_id: "name_id0"
+  #   gateway: "paper trading"
+  #   test:
+  #     symbol: "META"
+  #     iterations: 30
+  #     wait_secs: 3.0
+  #     flatten: true
+  #     orders:
+  #       - {side: BUY,  qty: 6.0}
+  #       - {side: SELL, qty: 5.0}
 
-  - id: "simple_test_strategy_8"
-    account_id: "name_id0"
-    gateway: "paper trading"
-    test:
-      symbol: "META"
-      iterations: 30
-      wait_secs: 3.0
-      flatten: true
-      orders:
-        - {side: BUY,  qty: 6.0}
-        - {side: SELL, qty: 5.0}
-
-  - id: "simple_test_strategy_9"
-    account_id: "name_id0"
-    gateway: "paper trading"
-    test:
-      symbol: "TSLA"
-      iterations: 30
-      wait_secs: 3.0
-      flatten: true
-      orders:
-        - {side: BUY,  qty: 3.0}
-        - {side: BUY,  qty: 2.0}
-        - {side: SELL, qty: 2.5}
+  # - id: "simple_test_strategy_9"
+  #   account_id: "name_id0"
+  #   gateway: "paper trading"
+  #   test:
+  #     symbol: "TSLA"
+  #     iterations: 30
+  #     wait_secs: 3.0
+  #     flatten: true
+  #     orders:
+  #       - {side: BUY,  qty: 3.0}
+  #       - {side: BUY,  qty: 2.0}
+  #       - {side: SELL, qty: 2.5}
