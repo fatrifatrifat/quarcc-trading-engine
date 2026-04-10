@@ -30,6 +30,13 @@ struct RetryFillsEvent {};
 // No lock required, they're all processed sequentially
 using OMEvent = std::variant<Bar, Tick, v1::ExecutionReport, RetryFillsEvent>;
 
+// Maximum number of market data events (Bar + Tick) buffered per OrderManager
+// before new ones are dropped
+// Fills and RetryFillsEvent are never subject to
+// this can
+// 2^13 is very random, but seems to give okay perf and doesn't kill my RAM :'(
+inline constexpr std::size_t MAX_MARKETDATA_QUEUE_DEPTH = 8192;
+
 class OrderManager {
 public:
   OrderManager(const OrderManager &) = delete;
@@ -59,6 +66,11 @@ public:
   void set_market_data_sinks(std::function<void(const Tick &)> tick_sink,
                              std::function<void(const Bar &)> bar_sink);
   void clear_market_data_sinks();
+
+  // Exactly the same thing as the functions above for market data, but for fill
+  // updates
+  void set_fill_sink(std::function<void(const v1::ExecutionReport &)> sink);
+  void clear_fill_sink();
 
   Result<LocalOrderId> process_signal(const v1::StrategySignal &signal);
   Result<std::monostate> process_signal(const v1::CancelSignal &signal);
@@ -113,6 +125,10 @@ private:
   std::function<void(const Tick &)> tick_sink_;
   std::function<void(const Bar &)> bar_sink_;
   std::mutex md_sink_mu_;
+
+  // Same thing as above again but for fills
+  std::function<void(const v1::ExecutionReport &)> fill_sink_;
+  std::mutex fill_sink_mu_;
 
   // IMPORTANT: dispatch_thread_ must remain last, its destructor joins the
   // thread before any other members are destroyed

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "execution.pb.h"
 #include "execution_service.pb.h"
 
 #include <trading/interfaces/i_market_data_feed.h>
@@ -33,6 +34,12 @@ struct IExecutionServiceHandler {
   SetupMarketDataStream(const std::string &strategy_id,
                         MarketDataSinks sinks) = 0;
   virtual void ClearMarketDataStream(const std::string &strategy_id) = 0;
+  virtual Result<std::monostate>
+  RegisterStrategy(const v1::RegisterStrategyRequest &req) = 0;
+  virtual Result<std::monostate>
+  SetupFillStream(const std::string &strategy_id,
+                  std::function<void(const v1::ExecutionReport &)> sink) = 0;
+  virtual void ClearFillStream(const std::string &strategy_id) = 0;
 };
 
 } // namespace quarcc

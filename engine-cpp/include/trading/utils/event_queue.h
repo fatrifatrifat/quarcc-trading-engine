@@ -4,7 +4,6 @@
 #include <mutex>
 #include <queue>
 #include <stop_token>
-#include <thread>
 
 namespace quarcc {
 
@@ -24,6 +23,22 @@ public:
       ++total_pushed_;
     }
     cv_.notify_one();
+  }
+
+  // Implemented after 1m market data almost killed my pc
+  // Pushes onto the queue only if the depth of it is less than max_depth, drops
+  // it otherwise
+  // total_pushed_ only incremented if the event is not dropped
+  bool try_push(T event, std::size_t max_depth) {
+    {
+      std::lock_guard lk{mu_};
+      if (q_.size() >= max_depth)
+        return false;
+      q_.push(std::move(event));
+      ++total_pushed_;
+    }
+    cv_.notify_one();
+    return true;
   }
 
   // Blocking pop

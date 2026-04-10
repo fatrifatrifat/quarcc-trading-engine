@@ -15,6 +15,8 @@ void FeedRegistry::register_subscription(FeedKey key, Symbol symbol,
     feed->set_tick_handler([this, key](const Tick &t) { on_tick(key, t); });
 
     feeds_.emplace(key, std::move(feed));
+    if (running_)
+      feeds_.at(key)->start();
   }
 
   feeds_.at(key)->subscribe(symbol, period);
@@ -42,6 +44,7 @@ void FeedRegistry::on_tick(const FeedKey &key, const Tick &tick) {
 }
 
 void FeedRegistry::start_all() {
+  running_ = true;
   for (auto &[key, feed] : feeds_)
     feed->start();
 }
@@ -56,6 +59,8 @@ void FeedRegistry::register_feed(FeedKey key,
   feed->set_bar_handler([this, key](const Bar &b) { on_bar(key, b); });
   feed->set_tick_handler([this, key](const Tick &t) { on_tick(key, t); });
   feeds_.emplace(key, std::move(feed));
+  if (running_)
+    feeds_.at(key)->start();
 }
 
 bool FeedRegistry::has_feed(const FeedKey &key) const {
