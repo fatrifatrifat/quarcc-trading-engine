@@ -299,7 +299,7 @@ TradingEngine::ActivateKillSwitch(const v1::KillSwitchRequest &req) {
     if (auto it = managers_.find(req.strategy_id()); it != managers_.end()) {
       it->second->cancel_all(req.reason(), req.initiated_by());
       managers_.erase(it);
-      return {};
+      return std::monostate{};
     }
 
     return std::unexpected(Error{
