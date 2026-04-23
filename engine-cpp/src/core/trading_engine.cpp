@@ -73,14 +73,13 @@ TradingEngine::create_strategy(const StrategyConfig &strat) {
         Error{"Invalid gateway: " + strat.gateway, ErrorType::Error});
   }
 
-  managers_.emplace(
-      StrategyId{strat.id},
-      OrderManager::create_order_manager(
-          strat.account_id, std::make_unique<PositionKeeper>(),
-          std::move(gateway),
-          std::make_unique<SQLiteJournal>(strat.database.journal),
-          std::make_unique<SQLiteOrderStore>(strat.database.orders),
-          std::make_unique<RiskManager>()));
+  managers_.emplace(StrategyId{strat.id},
+                    OrderManager::create_order_manager(
+                        strat.account_id, std::make_unique<PositionKeeper>(),
+                        std::move(gateway),
+                        std::make_unique<SQLiteJournal>(strat.id),
+                        std::make_unique<SQLiteOrderStore>(strat.id),
+                        std::make_unique<RiskManager>()));
 
   if (strat.market_data) {
     OrderManager *om = managers_.at(strat.id).get();
@@ -126,19 +125,9 @@ TradingEngine::RegisterStrategy(const v1::RegisterStrategyRequest &req) {
   strat.account_id = req.account_id();
   strat.gateway = req.gateway();
 
-  strat.database.journal =
-      req.journal_db().empty()
-          ? std::format("{}_{}.db", strat.id, "trading_journal")
-          : req.journal_db();
-  strat.database.orders =
-      req.orders_db().empty()
-          ? std::format("{}_{}.db", strat.id, "trading_orders")
-          : req.orders_db();
-
   if (req.has_adapter()) {
     AdapterConfig ac;
     ac.venue = req.adapter().venue();
-    ac.binary_path = req.adapter().binary_path();
     ac.credentials_path = req.adapter().credentials_path();
     ac.port = req.adapter().port();
     strat.adapter = std::move(ac);
