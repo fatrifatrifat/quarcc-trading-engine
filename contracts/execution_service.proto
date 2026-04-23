@@ -78,6 +78,7 @@ message HealthResponse {
 message KillSwitchRequest {
   string reason = 1;
   string initiated_by = 2;
+  string strategy_id = 3;
 }
 
 message MarketDataSubscriptionMessage {
@@ -92,9 +93,8 @@ message MarketDataConfigMessage {
 
 message AdapterConfigMessage {
   string venue = 1;
-  string binary_path = 2;
-  string credentials_path = 3;
-  int32 port = 4;
+  string credentials_path = 2;
+  int32 port = 3;
 }
 
 message RegisterStrategyRequest {

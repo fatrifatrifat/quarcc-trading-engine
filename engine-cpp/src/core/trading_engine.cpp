@@ -296,9 +296,19 @@ void TradingEngine::ClearFillStream(const std::string &strategy_id) {
 Result<std::monostate>
 TradingEngine::ActivateKillSwitch(const v1::KillSwitchRequest &req) {
   {
-    std::shared_lock lk{managers_mu_};
-    for (auto &[strategy_id, manager] : managers_)
-      manager->cancel_all(req.reason(), req.initiated_by());
+    if (auto it = managers_.find(req.strategy_id()); it != managers_.end()) {
+      it->second->cancel_all(req.reason(), req.initiated_by());
+      managers_.erase(it);
+      return {};
+    }
+
+    return std::unexpected(Error{
+        .message_ =
+            std::format("No strategy by the name of {}, failed to terminate",
+                        req.strategy_id()),
+        .type_ = ErrorType::Error}
+
+    );
   }
 
   {

@@ -9,8 +9,7 @@ message StrategySignal {
   string symbol = 2;
   Side side = 3;
   double target_quantity = 4;
-  double confidence = 5;
-  string generated_at = 6;
+  string generated_at = 5;
 }
 
 message CancelSignal {
@@ -24,7 +23,6 @@ message ReplaceSignal {
   string symbol = 2;
   Side side = 3;
   double target_quantity = 4;
-  double confidence = 5;
-  string generated_at = 6;
-  string order_id = 7;
+  string generated_at = 5;
+  string order_id = 6;
 }
