@@ -19,11 +19,6 @@ struct NetworkConfig {
   GrpcConfig grpc;
 };
 
-struct DatabaseConfig {
-  std::string journal = "trading_journal";
-  std::string orders = "trading_orders";
-};
-
 struct MarketDataSubscription {
   Symbol symbol;
   BarPeriod period; // e.g. "1m", "5m", "1d"
@@ -34,11 +29,25 @@ struct MarketDataConfig {
   std::vector<MarketDataSubscription> subscriptions;
 };
 
+// Only when gateway == "grpc_adapter" in the config.yaml file
+struct AdapterConfig {
+  static inline const std::string binary_path =
+      "python_client/adapters/adapter.py"; // path to the Python adapter script
+                                           // has to be ran through the project
+                                           // root
+  std::string venue; // "ibkr", "binance", "polymarket", "paper trading", etc.
+                     // (even tho none of them are implemented yet)
+  std::string credentials_path; // path to credentials YAML for this venue
+  int port{0};                  // port the adapter listens on (must be unique
+                                // per (venue, account_id) on this host)
+};
+
 struct StrategyConfig {
   std::string id;
   std::string account_id;
   std::string gateway;
-  DatabaseConfig database;
+  std::optional<AdapterConfig>
+      adapter; // required when gateway == "grpc_adapter"
   // Optional: not all strategies need market data from the engine
   std::optional<MarketDataConfig> market_data;
 };
@@ -48,26 +57,6 @@ struct Config {
   NetworkConfig network;
   std::vector<StrategyConfig> strategies;
 };
-
-static inline DatabaseConfig parse_database(const std::string &id,
-                                            const YAML::Node &dbNode) {
-  DatabaseConfig db;
-
-  if (!dbNode) {
-    db.journal = std::format("{}_{}.db", id, db.journal);
-    db.orders = std::format("{}_{}.db", id, db.orders);
-    return db;
-  }
-
-  if (dbNode["journal"])
-    db.journal =
-        std::format("{}_{}.db", id, dbNode["journal"].as<std::string>());
-
-  if (dbNode["orders"])
-    db.orders = std::format("{}_{}.db", id, dbNode["orders"].as<std::string>());
-
-  return db;
-}
 
 inline Config parse_config(const std::string &path) {
   YAML::Node root = YAML::LoadFile(path);
@@ -84,7 +73,15 @@ inline Config parse_config(const std::string &path) {
     s.id = node["id"].as<std::string>();
     s.account_id = node["account_id"].as<std::string>();
     s.gateway = node["gateway"].as<std::string>();
-    s.database = parse_database(s.id, node["database"]);
+
+    if (node["adapter"]) {
+      const auto &a = node["adapter"];
+      AdapterConfig ac;
+      ac.venue = a["venue"].as<std::string>();
+      ac.credentials_path = a["credentials"].as<std::string>();
+      ac.port = a["port"].as<int>();
+      s.adapter = std::move(ac);
+    }
 
     if (node["market_data"]) {
       MarketDataConfig md;

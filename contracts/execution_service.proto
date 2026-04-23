@@ -3,6 +3,7 @@ syntax = "proto3";
 package quarcc.v1;
 
 import "common.proto";
+import "execution.proto";
 import "strategy_signal.proto";
 import "market_data.proto";
 
@@ -22,6 +23,12 @@ service ExecutionService {
 
   // Streaming from server for live data (ticks/bars)
   rpc StreamMarketData(SubscribeMarketDataRequest) returns (stream MarketDataEvent);
+
+  // Dynamic strategy registration (no config.yaml required)
+  rpc RegisterStrategy(RegisterStrategyRequest) returns (RegisterStrategyResponse);
+
+  // Streaming fills (execution reports) back to the strategy process
+  rpc StreamFills(SubscribeFillsRequest) returns (stream ExecutionReport);
 }
 
 message SubmitSignalResponse {
@@ -71,4 +78,45 @@ message HealthResponse {
 message KillSwitchRequest {
   string reason = 1;
   string initiated_by = 2;
+  string strategy_id = 3;
+}
+
+message MarketDataSubscriptionMessage {
+  string symbol = 1;
+  string period = 2;
+}
+
+message MarketDataConfigMessage {
+  string feed = 1;
+  repeated MarketDataSubscriptionMessage subscriptions = 2;
+}
+
+message AdapterConfigMessage {
+  string venue = 1;
+  string credentials_path = 2;
+  int32 port = 3;
+}
+
+message RegisterStrategyRequest {
+  string strategy_id = 1;
+  string account_id = 2;
+  // "paper trading", "alpaca", or "grpc_adapter"
+  string gateway = 3;
+  // Only set when gateway == "grpc_adapter"
+  optional AdapterConfigMessage adapter = 4;
+  // Strategies without market data subscriptions omit this
+  optional MarketDataConfigMessage market_data = 5;
+  // if empty, it defaults to "<strategy_id>_trading_{journal,orders}.db"
+  // Might change it later if I decide to move everything in 1 DB
+  string journal_db = 6;
+  string orders_db = 7;
+}
+
+message RegisterStrategyResponse {
+  bool accepted = 1;
+  string rejection_reason = 2;
+}
+
+message SubscribeFillsRequest {
+  string strategy_id = 1;
 }

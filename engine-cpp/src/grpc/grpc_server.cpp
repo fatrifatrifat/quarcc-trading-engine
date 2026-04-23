@@ -295,4 +295,68 @@ grpc::Status gRPCServer::ExecutionServiceImpl::StreamMarketData(
   return grpc::Status::OK;
 }
 
+grpc::Status gRPCServer::ExecutionServiceImpl::RegisterStrategy(
+    grpc::ServerContext *context, const v1::RegisterStrategyRequest *request,
+    v1::RegisterStrategyResponse *response) {
+
+  if (!owner_ || !owner_->handler_) [[unlikely]] {
+    response->set_accepted(false);
+    response->set_rejection_reason("Server handler not initialized");
+    return grpc::Status(grpc::ABORTED, "Server handler not initialized");
+  }
+
+  std::cout << "RegisterStrategy request from " << context->peer() << " - "
+            << request->strategy_id() << " gateway=" << request->gateway()
+            << std::endl;
+
+  auto r = owner_->handler_->RegisterStrategy(*request);
+
+  if (!r) {
+    response->set_accepted(false);
+    response->set_rejection_reason(r.error().message_);
+    return grpc::Status(grpc::INVALID_ARGUMENT, r.error().message_);
+  }
+
+  response->set_accepted(true);
+  return grpc::Status::OK;
+}
+
+grpc::Status gRPCServer::ExecutionServiceImpl::StreamFills(
+    grpc::ServerContext *context, const v1::SubscribeFillsRequest *request,
+    grpc::ServerWriter<v1::ExecutionReport> *writer) {
+
+  if (!owner_ || !owner_->handler_) [[unlikely]] {
+    return grpc::Status(grpc::StatusCode::FAILED_PRECONDITION,
+                        "Server handler not initialized");
+  }
+
+  const std::string &strategy_id = request->strategy_id();
+  auto active = std::make_shared<std::atomic<bool>>(true);
+
+  auto sink = [writer, active](const v1::ExecutionReport &fill) {
+    if (!active->load(std::memory_order_relaxed))
+      return;
+    if (!writer->Write(fill))
+      active->store(false, std::memory_order_relaxed);
+  };
+
+  auto r = owner_->handler_->SetupFillStream(strategy_id, std::move(sink));
+  if (!r)
+    return grpc::Status(grpc::StatusCode::NOT_FOUND, r.error().message_);
+
+  std::cout << "Client " << context->peer()
+            << " subscribed to fill stream for strategy " << strategy_id
+            << "\n";
+
+  while (!context->IsCancelled() && active->load(std::memory_order_relaxed))
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+  owner_->handler_->ClearFillStream(strategy_id);
+
+  std::cout << "Client " << context->peer()
+            << " unsubscribed from fill stream for strategy " << strategy_id
+            << "\n";
+  return grpc::Status::OK;
+}
+
 } // namespace quarcc

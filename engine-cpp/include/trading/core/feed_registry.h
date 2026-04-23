@@ -38,6 +38,12 @@ public:
   void register_subscription(FeedKey key, Symbol symbol, BarPeriod period,
                              OrderManager *om);
 
+  // Pre registers a feed. Skips create_feed entirely by passing in a
+  // IMarketDataFeed object from outside
+  void register_feed(FeedKey key, std::unique_ptr<IMarketDataFeed> feed);
+
+  bool has_feed(const FeedKey &key) const;
+
   void on_bar(const FeedKey &key, const Bar &bar);
   void on_tick(const FeedKey &key, const Tick &tick);
 
@@ -81,9 +87,14 @@ private:
   };
 
 private:
-  // Different types of feeds, "alpaca", "csv", "simulated" etc.
-  // For actual external broker, I'm assuming each researcher will have it's
-  // broker own account, so a websocket connection for each account will open
+  // Set to true by start_all()
+  // Used so strategies registring later can have a different behaviour
+  // Basically not waiting for strat_all() which only gets called at the
+  // beginning to start the IMarketDataFeed associated with the new strategy
+  bool running_ = false;
+  // Different types of feeds, "alpaca", "csv", "simulated" etc. For actual
+  // external broker, I'm assuming each researcher will have it's broker own
+  // account, so a websocket connection for each account will open
   std::unordered_map<FeedKey, std::unique_ptr<IMarketDataFeed>, FeedKeyHash>
       feeds_;
 

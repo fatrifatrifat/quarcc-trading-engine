@@ -11,14 +11,12 @@ namespace quarcc::test {
 inline v1::StrategySignal make_signal(const std::string &strategy_id = "TEST",
                                       const std::string &symbol = "AAPL",
                                       v1::Side side = v1::Side::BUY,
-                                      double qty = 10.0,
-                                      double confidence = 1.0) {
+                                      double qty = 10.0) {
   v1::StrategySignal sig;
   sig.set_strategy_id(strategy_id);
   sig.set_symbol(symbol);
   sig.set_side(side);
   sig.set_target_quantity(qty);
-  sig.set_confidence(confidence);
   return sig;
 }
 
@@ -35,11 +33,12 @@ inline v1::Order make_order(const std::string &id = "ORD_001",
   return order;
 }
 
-inline StoredOrder make_stored_order(
-    const std::string &local_id = "ORD_001",
-    const std::string &symbol = "AAPL", v1::Side side = v1::Side::BUY,
-    double qty = 10.0, OrderStatus status = OrderStatus::SUBMITTED,
-    std::optional<std::string> broker_id = std::nullopt) {
+inline StoredOrder
+make_stored_order(const std::string &local_id = "ORD_001",
+                  const std::string &symbol = "AAPL",
+                  v1::Side side = v1::Side::BUY, double qty = 10.0,
+                  OrderStatus status = OrderStatus::SUBMITTED,
+                  std::optional<std::string> broker_id = std::nullopt) {
   StoredOrder stored;
   stored.local_id = local_id;
   stored.order = make_order(local_id, symbol, side, qty);
@@ -49,11 +48,10 @@ inline StoredOrder make_stored_order(
   return stored;
 }
 
-inline v1::ExecutionReport make_fill(const std::string &broker_id = "BROKER_001",
-                                     const std::string &symbol = "AAPL",
-                                     v1::Side side = v1::Side::BUY,
-                                     double filled_qty = 10.0,
-                                     double avg_price = 150.0) {
+inline v1::ExecutionReport
+make_fill(const std::string &broker_id = "BROKER_001",
+          const std::string &symbol = "AAPL", v1::Side side = v1::Side::BUY,
+          double filled_qty = 10.0, double avg_price = 150.0) {
   v1::ExecutionReport fill;
   fill.set_broker_order_id(broker_id);
   fill.set_symbol(symbol);

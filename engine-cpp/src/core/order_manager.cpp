@@ -39,7 +39,17 @@ OrderManager::OrderManager(std::string account_id,
 //  3. OM gets destroyed
 OrderManager::~OrderManager() { gateway_->stop(); }
 
-void OrderManager::enqueue(OMEvent event) { queue_.push(std::move(event)); }
+void OrderManager::enqueue(OMEvent event) {
+  // Can drop market data if there's too much to process, it's okay to drop them
+  // This doesn't apply to v1::ExecutionReport and RetryFillsEvent because they
+  // CANNOT be dropped
+  if (std::holds_alternative<Bar>(event) ||
+      std::holds_alternative<Tick>(event)) {
+    queue_.try_push(std::move(event), MAX_MARKETDATA_QUEUE_DEPTH);
+    return;
+  }
+  queue_.push(std::move(event));
+}
 
 void OrderManager::wait_idle() { queue_.wait_idle(); }
 
@@ -79,6 +89,32 @@ void OrderManager::handle_fill(const v1::ExecutionReport &fill) {
     return;
   }
   const std::string &local_id = *local_id_opt;
+
+  // In case the order gets rejected/cancelled
+  const auto proto_status = fill.status();
+  if (proto_status == v1::OrderStatus::REJECTED ||
+      proto_status == v1::OrderStatus::CANCELLED) {
+
+    const OrderStatus new_status = (proto_status == v1::OrderStatus::REJECTED)
+                                       ? OrderStatus::REJECTED
+                                       : OrderStatus::CANCELLED;
+
+    if (auto r = order_store_->update_order_status(local_id, new_status); !r) {
+      journal_->log(Event::ERROR_OCCURRED, r.error().message_, local_id);
+      journal_->log(
+          proto_status == v1::OrderStatus::REJECTED ? Event::ORDER_REJECTED
+                                                    : Event::ORDER_CANCELLED,
+          "Reported by gateway for broker_id: " + broker_id, local_id);
+    }
+
+    id_mapper_->remove_mapping(local_id);
+    {
+      std::lock_guard lk{fill_sink_mu_};
+      if (fill_sink_) [[likely]]
+        fill_sink_(fill);
+    }
+    return;
+  }
 
   // 2. Fetch the stored order to determine full vs partial fill
   auto stored = order_store_->get_order(local_id);
@@ -126,15 +162,24 @@ void OrderManager::handle_fill(const v1::ExecutionReport &fill) {
   // filled
   if (fully_filled)
     id_mapper_->remove_mapping(local_id);
+
+  // 8. Notify fill sink (StreamFills gRPC stream)
+  {
+    std::lock_guard lk{fill_sink_mu_};
+    if (fill_sink_) [[likely]]
+      fill_sink_(fill);
+  }
 }
 
 void OrderManager::handle_bar(const Bar &bar) {
+  // TODO (in a very long time): Logic about in memory orderbook update
   std::lock_guard lk{md_sink_mu_};
   if (bar_sink_) [[likely]]
     bar_sink_(bar);
 }
 
 void OrderManager::handle_tick(const Tick &tick) {
+  // TODO (in a very long time): Logic about in memory orderbook update
   std::lock_guard lk{md_sink_mu_};
   if (tick_sink_) [[likely]]
     tick_sink_(tick);
@@ -152,6 +197,17 @@ void OrderManager::clear_market_data_sinks() {
   std::lock_guard lk{md_sink_mu_};
   tick_sink_ = nullptr;
   bar_sink_ = nullptr;
+}
+
+void OrderManager::set_fill_sink(
+    std::function<void(const v1::ExecutionReport &)> sink) {
+  std::lock_guard lk{fill_sink_mu_};
+  fill_sink_ = std::move(sink);
+}
+
+void OrderManager::clear_fill_sink() {
+  std::lock_guard lk{fill_sink_mu_};
+  fill_sink_ = nullptr;
 }
 
 void OrderManager::handle_retry_fills() {

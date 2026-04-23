@@ -5,7 +5,8 @@
 namespace quarcc {
 
 SQLiteOrderStore::SQLiteOrderStore(const std::string &db_path) {
-  int rc = sqlite3_open(db_path.c_str(), &db_);
+  int rc =
+      sqlite3_open(std::format("{}_order_store.db", db_path).c_str(), &db_);
   if (rc != SQLITE_OK) [[unlikely]] {
     std::string error = sqlite3_errmsg(db_);
     throw std::runtime_error("Failed to open order store database: " + error);
@@ -13,7 +14,8 @@ SQLiteOrderStore::SQLiteOrderStore(const std::string &db_path) {
 
   sqlite3_exec(db_, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
   sqlite3_exec(db_, "PRAGMA synchronous=NORMAL;", nullptr, nullptr, nullptr);
-  sqlite3_exec(db_, "PRAGMA cache_size=-8000;", nullptr, nullptr, nullptr);  // 8MB cache
+  sqlite3_exec(db_, "PRAGMA cache_size=-8000;", nullptr, nullptr,
+               nullptr); // 8MB cache
 
   create_schema();
 }

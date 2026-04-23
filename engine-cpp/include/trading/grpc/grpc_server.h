@@ -58,6 +58,16 @@ private:
                      const v1::SubscribeMarketDataRequest *request,
                      grpc::ServerWriter<v1::MarketDataEvent> *writer) override;
 
+    grpc::Status
+    RegisterStrategy(grpc::ServerContext *context,
+                     const v1::RegisterStrategyRequest *request,
+                     v1::RegisterStrategyResponse *response) override;
+
+    grpc::Status
+    StreamFills(grpc::ServerContext *context,
+                const v1::SubscribeFillsRequest *request,
+                grpc::ServerWriter<v1::ExecutionReport> *writer) override;
+
   private:
     gRPCServer *owner_ = nullptr;
   };
