@@ -5,7 +5,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import logging
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 import grpc
 
@@ -16,6 +16,9 @@ from gen.python.contracts import (
     market_data_pb2,
     strategy_signal_pb2,
 )
+
+if TYPE_CHECKING:
+    from strategy.config import StrategyConfig
 
 logging.basicConfig(level=logging.INFO)
 
@@ -35,7 +38,6 @@ class ExecutionClient:
         symbol: str,
         side: str,  # "BUY" or "SELL"
         quantity: float,
-        confidence: float = 1.0,
     ) -> Optional[str]:
         """
         Submit a trading signal.
@@ -49,7 +51,6 @@ class ExecutionClient:
         signal.symbol = symbol
         signal.side = common_pb2.Side.BUY if side == "BUY" else common_pb2.Side.SELL
         signal.target_quantity = quantity
-        signal.confidence = confidence
 
         # Set timestamp
         from datetime import datetime
@@ -61,10 +62,10 @@ class ExecutionClient:
             response = self.stub.SubmitSignal(signal)
 
             if response.accepted:
-                self.logger.info(f"✓ Signal accepted! Order ID: {response.order_id}")
+                self.logger.info(f"Signal accepted! Order ID: {response.order_id}")
                 return response.order_id
             else:
-                self.logger.warning(f"✗ Signal rejected: {response.rejection_reason}")
+                self.logger.warning(f"Signal rejected: {response.rejection_reason}")
                 return None
 
         except grpc.RpcError as e:
@@ -97,10 +98,10 @@ class ExecutionClient:
             response = self.stub.CancelOrder(signal)
 
             if response.accepted:
-                self.logger.info(f"✓ Cancel signal accepted!")
+                self.logger.info(f"Cancel signal accepted!")
             else:
                 self.logger.warning(
-                    f"✗ Cancel signal rejected: {response.rejection_reason}"
+                    f"Cancel signal rejected: {response.rejection_reason}"
                 )
                 return None
 
@@ -115,7 +116,6 @@ class ExecutionClient:
         symbol: str,
         side: str,  # "BUY" or "SELL"
         quantity: float,
-        confidence: float = 1.0,
     ) -> Optional[str]:
         """
         Submit a replace signal.
@@ -129,7 +129,6 @@ class ExecutionClient:
         signal.symbol = symbol
         signal.side = common_pb2.Side.BUY if side == "BUY" else common_pb2.Side.SELL
         signal.target_quantity = quantity
-        signal.confidence = confidence
         signal.order_id = order_id
 
         # set timestamp
@@ -143,12 +142,12 @@ class ExecutionClient:
 
             if response.accepted:
                 self.logger.info(
-                    f"✓ Replace signal accepted! Order ID: {response.order_id}"
+                    f"Replace signal accepted! Order ID: {response.order_id}"
                 )
                 return response.order_id
             else:
                 self.logger.warning(
-                    f"✗ Replace signal rejected: {response.rejection_reason}"
+                    f"Replace signal rejected: {response.rejection_reason}"
                 )
                 return None
 
@@ -166,6 +165,7 @@ class ExecutionClient:
                 "symbol": position.symbol,
                 "quantity": position.quantity,
                 "avg_price": position.avg_price,
+                # TODO: uPnL not implemented (yet?)
                 "unrealized_pnl": position.unrealized_pnl,
                 "realized_pnl": position.realized_pnl,
             }
@@ -184,6 +184,7 @@ class ExecutionClient:
                     "symbol": p.symbol,
                     "quantity": p.quantity,
                     "avg_price": p.avg_price,
+                    # TODO: uPnL not implemented (yet?)
                     "unrealized_pnl": p.unrealized_pnl,
                     "realized_pnl": p.realized_pnl,
                 }
@@ -193,17 +194,59 @@ class ExecutionClient:
             self.logger.error(f"Failed to get positions: {e}")
             return []
 
-    def activate_kill_switch(self, reason: str, initiated_by: str):
-        """Emergency: Stop all trading"""
+    def activate_kill_switch(self, reason: str, initiated_by: str, strategy_id: str):
+        """Stop strategy"""
         request = execution_service_pb2.KillSwitchRequest(
-            reason=reason, initiated_by=initiated_by
+            reason=reason, initiated_by=initiated_by, strategy_id=strategy_id
         )
 
         try:
             self.stub.ActivateKillSwitch(request)
-            self.logger.error(f"⚠️  KILL SWITCH ACTIVATED: {reason}")
+            self.logger.info(f"KILL SWITCH ACTIVATED: {reason}")
         except grpc.RpcError as e:
             self.logger.error(f"Failed to activate kill switch: {e}")
+
+    def register_strategy(self, config: "StrategyConfig") -> bool:
+        """
+        Register a strategy dynamically with the engine (no config.yaml entry
+        required).  Returns True if accepted, False if rejected
+        """
+        req = config.to_proto()
+        try:
+            response = self.stub.RegisterStrategy(req)
+            if response.accepted:
+                self.logger.info(
+                    f"Strategy '{config.strategy_id}' registered successfully"
+                )
+                return True
+            self.logger.error(
+                f"Strategy '{config.strategy_id}' rejected: {response.rejection_reason}"
+            )
+            return False
+        except grpc.RpcError as e:
+            self.logger.error(
+                f"gRPC error registering strategy: {e.code()} - {e.details()}"
+            )
+            return False
+
+    def stream_fills(
+        self,
+        strategy_id: str,
+        on_fill: Optional[Callable] = None,
+    ) -> None:
+        """
+        Subscribe to the fill stream for ``strategy_id``
+
+        Blocks until the stream ends.  *on_fill* receives a ``v1.ExecutionReport``
+        protobuf message for every fill, partial fill, rejection, or cancellation
+        """
+        req = execution_service_pb2.SubscribeFillsRequest(strategy_id=strategy_id)
+        try:
+            for fill in self.stub.StreamFills(req):
+                if on_fill:
+                    on_fill(fill)
+        except grpc.RpcError as e:
+            self.logger.info(f"Fill stream ended: {e.code()} - {e.details()}")
 
     def stream_market_data(
         self,
@@ -212,14 +255,12 @@ class ExecutionClient:
         on_bar: Optional[Callable] = None,
     ) -> None:
         """
-        Subscribe to the market data stream for *strategy_id*.
+        Subscribe to the market data stream for ``strategy_id``.
 
         Blocks until the stream ends (server shutdown or client disconnect).
 
-        *on_tick* receives a TickEvent protobuf message.
-        *on_bar*  receives a BarEvent  protobuf message.
-        Both are the inner messages from the MarketDataEvent oneof — not the
-        outer envelope.
+        ``on_tick()`` receives a TickEvent protobuf message.
+        ``on_bar()``  receives a BarEvent  protobuf message.
         """
         req = market_data_pb2.SubscribeMarketDataRequest(strategy_id=strategy_id)
         try:
@@ -230,9 +271,7 @@ class ExecutionClient:
                 elif which == "bar" and on_bar:
                     on_bar(event.bar)
         except grpc.RpcError as e:
-            self.logger.info(
-                f"Market data stream ended: {e.code()} - {e.details()}"
-            )
+            self.logger.info(f"Market data stream ended: {e.code()} - {e.details()}")
 
     def close(self):
         """Close connection"""
