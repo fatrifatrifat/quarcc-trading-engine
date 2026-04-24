@@ -5,7 +5,10 @@
 namespace quarcc {
 
 SQLiteJournal::SQLiteJournal(const std::string &db_path) {
-  int rc = sqlite3_open(std::format("{}_journal.db", db_path).c_str(), &db_);
+  std::string full_path = (db_path == ":memory:")
+                              ? db_path
+                              : std::format("{}_order_store.db", db_path);
+  int rc = sqlite3_open(full_path.c_str(), &db_);
   if (rc != SQLITE_OK) [[unlikely]] {
     std::string error = sqlite3_errmsg(db_);
     throw std::runtime_error("Failed to open journal database: " + error);
