@@ -40,9 +40,9 @@ TEST_F(OrderStoreFixture, UpdateOrderStatusChangesStatus) {
 }
 
 TEST_F(OrderStoreFixture, UpdateBrokerIdSetsBrokerId) {
-  store.store_order(
-      test::make_stored_order("L3", "AAPL", v1::Side::BUY, 10.0,
-                              OrderStatus::PENDING_SUBMISSION, std::nullopt));
+  store.store_order(test::make_stored_order("L3", "AAPL", v1::Side::BUY, 10.0,
+                                            OrderStatus::PENDING_SUBMISSION,
+                                            std::nullopt));
 
   auto result = store.update_broker_id("L3", "BROKER_99");
   ASSERT_TRUE(result.has_value());
@@ -68,8 +68,8 @@ TEST_F(OrderStoreFixture, UpdateFillInfoSetsFillFields) {
 TEST_F(OrderStoreFixture, GetOpenOrdersReturnsOnlyNonTerminalOrders) {
   store.store_order(test::make_stored_order("OPEN_1", "AAPL", v1::Side::BUY,
                                             5.0, OrderStatus::SUBMITTED));
-  store.store_order(test::make_stored_order("OPEN_2", "MSFT", v1::Side::BUY,
-                                            5.0, OrderStatus::PARTIALLY_FILLED));
+  store.store_order(test::make_stored_order(
+      "OPEN_2", "MSFT", v1::Side::BUY, 5.0, OrderStatus::PARTIALLY_FILLED));
   store.store_order(test::make_stored_order("CLOSED", "TSLA", v1::Side::SELL,
                                             5.0, OrderStatus::FILLED));
 
@@ -82,8 +82,10 @@ TEST_F(OrderStoreFixture, GetOpenOrdersReturnsOnlyNonTerminalOrders) {
   // Both open orders must be present
   bool found_open1 = false, found_open2 = false;
   for (const auto &o : open) {
-    if (o.local_id == "OPEN_1") found_open1 = true;
-    if (o.local_id == "OPEN_2") found_open2 = true;
+    if (o.local_id == "OPEN_1")
+      found_open1 = true;
+    if (o.local_id == "OPEN_2")
+      found_open2 = true;
   }
   EXPECT_TRUE(found_open1);
   EXPECT_TRUE(found_open2);

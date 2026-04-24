@@ -5,8 +5,10 @@
 namespace quarcc {
 
 SQLiteOrderStore::SQLiteOrderStore(const std::string &db_path) {
-  int rc =
-      sqlite3_open(std::format("{}_order_store.db", db_path).c_str(), &db_);
+  std::string full_path = (db_path == ":memory:")
+                              ? db_path
+                              : std::format("{}_order_store.db", db_path);
+  int rc = sqlite3_open(full_path.c_str(), &db_);
   if (rc != SQLITE_OK) [[unlikely]] {
     std::string error = sqlite3_errmsg(db_);
     throw std::runtime_error("Failed to open order store database: " + error);
@@ -113,7 +115,7 @@ SQLiteOrderStore::store_order(const StoredOrder &stored_order) {
   sqlite3_bind_double(stmt, 14, stored_order.avg_fill_price);
 
   std::string serialized;
-  order.SerializeToString(&serialized);
+  [[maybe_unused]] const bool success = order.SerializeToString(&serialized);
   sqlite3_bind_blob(stmt, 15, serialized.data(), serialized.size(),
                     SQLITE_TRANSIENT);
 
@@ -277,7 +279,7 @@ StoredOrder SQLiteOrderStore::parse_order(sqlite3_stmt *stmt) {
 
   const void *blob = sqlite3_column_blob(stmt, 7);
   int size = sqlite3_column_bytes(stmt, 7);
-  stored.order.ParseFromArray(blob, size);
+  [[maybe_unused]] const bool success = stored.order.ParseFromArray(blob, size);
 
   return stored;
 }
@@ -305,7 +307,7 @@ Result<StoredOrder> SQLiteOrderStore::get_order(const std::string &local_id) {
 
   rc = sqlite3_step(stmt);
 
-  if (rc == SQLITE_ROW) [[unlikely]] {
+  if (rc == SQLITE_ROW) [[likely]] {
     StoredOrder order = parse_order(stmt);
     sqlite3_finalize(stmt);
     return order;
